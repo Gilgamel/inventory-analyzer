@@ -828,6 +828,7 @@ def main():
                                 brand_abc.style.format({
                                     'SKU Count': '{:,.0f}',
                                     'Inventory Value': '${:,.2f}',
+                                    'Inventory Value': '${:,.2f}',
                                     'Total Qty': '{:,.0f}',
                                     'Value %': '{:.2%}',
                                     'Cumulative %': '{:.2%}'
