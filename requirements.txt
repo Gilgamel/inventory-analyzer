@@ -16,8 +16,6 @@ seaborn==0.13.2                  # 统计图表
 python-dateutil==2.9.0
 pytz==2025.2
 
-# ===== 缓存和性能 =====
-cachetools==6.2.2
 
 # ===== 开发工具（可选）=====
 python-dotenv==1.1.0             # 环境变量管理
