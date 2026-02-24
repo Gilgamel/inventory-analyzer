@@ -101,7 +101,7 @@ def connect_to_gsheet():
 def load_warehouse_region_mapping():
     """
     从Google Sheets加载静态的仓库区域映射表
-    表结构: Warehouse, Country, Type, Description
+    表结构: Warehouse, Country Code, Country, Type, Description
     """
     try:
         client = connect_to_gsheet()
@@ -127,21 +127,25 @@ def load_warehouse_region_mapping():
         # 转换为DataFrame
         mapping_df = pd.DataFrame(records)
         
-        # 确保列名正确
-        expected_columns = ['Warehouse','Country Code', 'Country', 'Type', 'Description']
+        # 标准化列名
+        mapping_df.columns = [str(col).strip() for col in mapping_df.columns]
         
-        # 检查列是否存在，如果不存在尝试匹配
-        actual_columns = mapping_df.columns.tolist()
-        
-        # 创建列名映射字典
+        # 创建列名映射
         column_mapping = {}
-        for expected in expected_columns:
-            for actual in actual_columns:
-                if expected.lower() in actual.lower():
-                    column_mapping[actual] = expected
-                    break
+        for col in mapping_df.columns:
+            col_lower = col.lower()
+            if 'warehouse' in col_lower or '仓库' in col_lower:
+                column_mapping[col] = 'Warehouse'
+            elif 'country code' in col_lower or '国家代码' in col_lower:
+                column_mapping[col] = 'Country_Code'
+            elif 'country' in col_lower and 'code' not in col_lower:
+                column_mapping[col] = 'Country_Name'
+            elif 'type' in col_lower or '类型' in col_lower:
+                column_mapping[col] = 'Type'
+            elif 'description' in col_lower or '描述' in col_lower:
+                column_mapping[col] = 'Description'
         
-        # 如果有映射，重命名列
+        # 重命名列
         if column_mapping:
             mapping_df = mapping_df.rename(columns=column_mapping)
         
@@ -150,15 +154,15 @@ def load_warehouse_region_mapping():
             st.error("仓库映射表中缺少Warehouse列")
             return None
         
-        if 'Country Code' not in mapping_df.columns:
-            st.error("仓库映射表中缺少Country列")
+        if 'Country_Code' not in mapping_df.columns:
+            st.error("仓库映射表中缺少Country Code列")
             return None
         
         # 显示预览
         with st.expander("查看仓库映射表"):
             st.dataframe(mapping_df.head())
             st.write(f"总记录数: {len(mapping_df)}")
-            st.write(f"国家分布: {mapping_df['Country Code'].value_counts().to_dict()}")
+            st.write(f"国家代码分布: {mapping_df['Country_Code'].value_counts().to_dict()}")
         
         return mapping_df
         
@@ -210,19 +214,31 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     mapping_join = mapping_df.copy()
     
     # 将仓库列转换为字符串并去除空格，确保匹配
-    inventory_join['_join_key'] = inventory_join[warehouse_col_inventory].astype(str).str.strip()
-    mapping_join['_join_key'] = mapping_join['Warehouse'].astype(str).str.strip()
+    inventory_join['_join_key'] = inventory_join[warehouse_col_inventory].astype(str).str.strip().str.upper()
+    mapping_join['_join_key'] = mapping_join['Warehouse'].astype(str).str.strip().str.upper()
+    
+    # 选择需要的列
+    mapping_cols = ['_join_key', 'Country_Code']
+    if 'Type' in mapping_join.columns:
+        mapping_cols.append('Type')
+    if 'Description' in mapping_join.columns:
+        mapping_cols.append('Description')
+    if 'Country_Name' in mapping_join.columns:
+        mapping_cols.append('Country_Name')
     
     # 执行LEFT JOIN
     merged_df = pd.merge(
         inventory_join,
-        mapping_join[['_join_key', 'Country', 'Type', 'Description']],
+        mapping_join[mapping_cols],
         on='_join_key',
         how='left'
     )
     
     # 删除临时列
     merged_df = merged_df.drop('_join_key', axis=1)
+    
+    # 重命名Country_Code为Country
+    merged_df = merged_df.rename(columns={'Country_Code': 'Country'})
     
     # 统计匹配情况
     total_rows = len(merged_df)
@@ -258,8 +274,13 @@ def preprocess_data(df):
     """
     数据预处理：重命名列名
     """
+    # 创建副本避免修改原数据
+    df_copy = df.copy()
+    
     # 重命名列
-    df_renamed = df.rename(columns=COLUMN_MAPPING)
+    for chinese_name, english_name in COLUMN_MAPPING.items():
+        if chinese_name in df_copy.columns:
+            df_copy = df_copy.rename(columns={chinese_name: english_name})
     
     # 确保数值列为数字类型
     numeric_cols = ['Total_Inventory', 'Available_Qty', 'Reserved_Qty', 'Defect_Qty',
@@ -272,10 +293,10 @@ def preprocess_data(df):
         numeric_cols.extend(band['cost_cols'])
     
     for col in numeric_cols:
-        if col in df_renamed.columns:
-            df_renamed[col] = pd.to_numeric(df_renamed[col], errors='coerce').fillna(0)
+        if col in df_copy.columns:
+            df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(0)
     
-    return df_renamed
+    return df_copy
 
 # ========== 7. 计算各库龄段库存价值 ==========
 def calculate_age_band_values(df):
@@ -302,32 +323,75 @@ def calculate_age_band_values(df):
             result[f'{band_name}_Qty'] = 0
     
     # 计算总库存价值
-    value_cols = [f"{band['name']}_Value" for band in AGE_BANDS]
-    result['Total_Value'] = result[value_cols].sum(axis=1)
+    value_cols = [f"{band['name']}_Value" for band in AGE_BANDS if f"{band['name']}_Value" in result.columns]
+    if value_cols:
+        result['Total_Value'] = result[value_cols].sum(axis=1)
+    else:
+        result['Total_Value'] = 0
     
     return result
 
-# ========== 8. ABC分类函数 ==========
+# ========== 8. 修改后的ABC分类函数（满足您的需求）==========
 def abc_classification(df, value_col, group_col=None):
     """
-    ABC分类函数
+    ABC分类函数 - 修改版
+    当累计占比跨越0.8或0.95阈值时，包含跨越点的项也算入前一类
     """
+    if df.empty or value_col not in df.columns:
+        return df
+    
     if group_col and group_col in df.columns:
         result_dfs = []
         for group, group_df in df.groupby(group_col):
             if len(group_df) > 0:
+                # 按价值降序排序
                 sorted_df = group_df.sort_values(value_col, ascending=False).copy()
                 total = sorted_df[value_col].sum()
+                
                 if total > 0:
+                    # 计算价值占比
                     sorted_df['value_pct'] = sorted_df[value_col] / total
-                    sorted_df['cum_pct'] = sorted_df['value_pct'].cumsum()
                     
-                    conditions = [
-                        sorted_df['cum_pct'] <= 0.8,
-                        sorted_df['cum_pct'] <= 0.95
-                    ]
-                    choices = ['A', 'B']
-                    sorted_df['abc_class'] = np.select(conditions, choices, default='C')
+                    # 计算累计占比
+                    cum_pct = 0
+                    cum_pct_list = []
+                    
+                    for pct in sorted_df['value_pct']:
+                        cum_pct += pct
+                        cum_pct_list.append(cum_pct)
+                    
+                    sorted_df['cum_pct'] = cum_pct_list
+                    
+                    # 初始化分类列
+                    sorted_df['abc_class'] = 'C'  # 默认为C类
+                    
+                    # 找出A类：累计占比 <= 0.8 或者 从小于0.8跨越到大于0.8的项
+                    a_mask = pd.Series(False, index=sorted_df.index)
+                    prev_cum = 0
+                    
+                    for idx, cum in zip(sorted_df.index, cum_pct_list):
+                        if cum <= 0.8 or (prev_cum < 0.8 and cum > 0.8):
+                            a_mask[idx] = True
+                        prev_cum = cum
+                    
+                    sorted_df.loc[a_mask, 'abc_class'] = 'A'
+                    
+                    # 找出B类：在A类之后，累计占比 <= 0.95 或者 从小于0.95跨越到大于0.95的项
+                    b_mask = pd.Series(False, index=sorted_df.index)
+                    prev_cum = 0
+                    a_passed = False
+                    
+                    for idx, cum in zip(sorted_df.index, cum_pct_list):
+                        if cum <= 0.95 or (prev_cum < 0.95 and cum > 0.95):
+                            # 如果已经是A类，跳过
+                            if not a_mask[idx]:
+                                b_mask[idx] = True
+                        prev_cum = cum
+                    
+                    # B类不能覆盖A类
+                    b_mask = b_mask & ~a_mask
+                    sorted_df.loc[b_mask, 'abc_class'] = 'B'
+                    
                 else:
                     sorted_df['value_pct'] = 0
                     sorted_df['cum_pct'] = 0
@@ -336,19 +400,56 @@ def abc_classification(df, value_col, group_col=None):
                 result_dfs.append(sorted_df)
         
         return pd.concat(result_dfs, ignore_index=True) if result_dfs else df
+    
     else:
+        # 整体分类（无分组）
         sorted_df = df.sort_values(value_col, ascending=False).copy()
         total = sorted_df[value_col].sum()
+        
         if total > 0:
+            # 计算价值占比
             sorted_df['value_pct'] = sorted_df[value_col] / total
-            sorted_df['cum_pct'] = sorted_df['value_pct'].cumsum()
             
-            conditions = [
-                sorted_df['cum_pct'] <= 0.8,
-                sorted_df['cum_pct'] <= 0.95
-            ]
-            choices = ['A', 'B']
-            sorted_df['abc_class'] = np.select(conditions, choices, default='C')
+            # 计算累计占比
+            cum_pct = 0
+            cum_pct_list = []
+            
+            for pct in sorted_df['value_pct']:
+                cum_pct += pct
+                cum_pct_list.append(cum_pct)
+            
+            sorted_df['cum_pct'] = cum_pct_list
+            
+            # 初始化分类列
+            sorted_df['abc_class'] = 'C'  # 默认为C类
+            
+            # 找出A类：累计占比 <= 0.8 或者 从小于0.8跨越到大于0.8的项
+            a_mask = pd.Series(False, index=sorted_df.index)
+            prev_cum = 0
+            
+            for idx, cum in zip(sorted_df.index, cum_pct_list):
+                if cum <= 0.8 or (prev_cum < 0.8 and cum > 0.8):
+                    a_mask[idx] = True
+                prev_cum = cum
+            
+            sorted_df.loc[a_mask, 'abc_class'] = 'A'
+            
+            # 找出B类：在A类之后，累计占比 <= 0.95 或者 从小于0.95跨越到大于0.95的项
+            b_mask = pd.Series(False, index=sorted_df.index)
+            prev_cum = 0
+            a_passed = False
+            
+            for idx, cum in zip(sorted_df.index, cum_pct_list):
+                if cum <= 0.95 or (prev_cum < 0.95 and cum > 0.95):
+                    # 如果已经是A类，跳过
+                    if not a_mask[idx]:
+                        b_mask[idx] = True
+                prev_cum = cum
+            
+            # B类不能覆盖A类
+            b_mask = b_mask & ~a_mask
+            sorted_df.loc[b_mask, 'abc_class'] = 'B'
+            
         else:
             sorted_df['value_pct'] = 0
             sorted_df['cum_pct'] = 0
@@ -361,7 +462,10 @@ def generate_age_summary(df, country):
     """
     生成库龄汇总报表
     """
-    country_df = df[df['Country_x'] == country].copy() if 'Country_x' in df.columns else df
+    if 'Country' not in df.columns:
+        return pd.DataFrame()
+    
+    country_df = df[df['Country'] == country].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -370,16 +474,20 @@ def generate_age_summary(df, country):
     for band in AGE_BANDS:
         band_name = band['name']
         value_col = f'{band_name}_Value'
+        qty_col = f'{band_name}_Qty'
         
         if value_col in country_df.columns:
             total_value = country_df[value_col].sum()
-            total_qty = country_df[f'{band_name}_Qty'].sum() if f'{band_name}_Qty' in country_df.columns else 0
+            total_qty = country_df[qty_col].sum() if qty_col in country_df.columns else 0
             
             age_summary.append({
                 '库龄区间': band_name,
                 '库存数量': total_qty,
                 '库存价值': total_value
             })
+    
+    if not age_summary:
+        return pd.DataFrame()
     
     summary_df = pd.DataFrame(age_summary)
     total_value = summary_df['库存价值'].sum()
@@ -392,9 +500,12 @@ def generate_brand_abc(df, country):
     """
     生成品牌ABC分类报表
     """
-    country_df = df[df['Country_x'] == country].copy() if 'Country_x' in df.columns else df
+    if 'Country' not in df.columns or 'Brand' not in df.columns:
+        return pd.DataFrame()
     
-    if len(country_df) == 0 or 'Brand' not in country_df.columns:
+    country_df = df[df['Country'] == country].copy()
+    
+    if len(country_df) == 0:
         return pd.DataFrame()
     
     brand_summary = country_df.groupby('Brand').agg({
@@ -411,6 +522,7 @@ def generate_brand_abc(df, country):
     if len(brand_summary) == 0:
         return pd.DataFrame()
     
+    # 使用修改后的ABC分类函数
     brand_abc = abc_classification(brand_summary, 'Total_Value')
     
     brand_abc = brand_abc.rename(columns={
@@ -428,24 +540,36 @@ def generate_sku_abc(df, country):
     """
     生成SKU ABC分类报表
     """
-    country_df = df[df['Country_x'] == country].copy() if 'Country_x' in df.columns else df
+    if 'Country' not in df.columns:
+        return pd.DataFrame()
+    
+    country_df = df[df['Country'] == country].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
     
-    sku_data = country_df[['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Inventory']].copy()
+    # 准备SKU级数据
+    sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Inventory']
+    available_cols = [col for col in sku_cols if col in country_df.columns]
+    
+    if not available_cols:
+        return pd.DataFrame()
+    
+    sku_data = country_df[available_cols].copy()
     sku_data = sku_data[sku_data['Total_Value'] > 0]
     
     if len(sku_data) == 0:
         return pd.DataFrame()
     
+    # 获取品牌分类
     brand_abc = generate_brand_abc(df, country)
-    if len(brand_abc) > 0:
+    if len(brand_abc) > 0 and '品牌' in brand_abc.columns:
         brand_class_map = dict(zip(brand_abc['品牌'], brand_abc['品牌分类']))
         sku_data['品牌分类'] = sku_data['Brand'].map(brand_class_map)
     else:
         sku_data['品牌分类'] = '未分类'
     
+    # 使用修改后的ABC分类函数进行SKU级分类
     sku_abc = abc_classification(sku_data, 'Total_Value', group_col='Brand')
     
     sku_abc = sku_abc.rename(columns={
@@ -472,6 +596,7 @@ def save_to_gsheet(data_df, country, analysis_type):
             return False
         
         # 添加时间戳
+        data_df = data_df.copy()
         data_df['分析日期'] = datetime.now().strftime('%Y-%m-%d')
         data_df['时间戳'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
@@ -518,7 +643,42 @@ def save_to_gsheet(data_df, country, analysis_type):
         st.error(f"保存失败: {str(e)}")
         return False
 
-# ========== 13. 主程序 ==========
+# ========== 13. 演示ABC分类逻辑的函数 ==========
+def demonstrate_abc_logic():
+    """
+    演示修改后的ABC分类逻辑
+    """
+    st.subheader("📊 ABC分类逻辑演示")
+    
+    # 创建示例数据
+    example_data = pd.DataFrame({
+        '项目': ['Item1', 'Item2', 'Item3', 'Item4', 'Item5', 'Item6'],
+        '价值': [400, 300, 200, 50, 30, 20]
+    })
+    
+    st.write("示例数据：")
+    st.dataframe(example_data)
+    
+    # 应用ABC分类
+    result = abc_classification(example_data, '价值')
+    
+    st.write("分类结果（注意跨越80%阈值的Item3被归为A类）：")
+    st.dataframe(result.style.format({
+        'value_pct': '{:.2%}',
+        'cum_pct': '{:.2%}'
+    }))
+    
+    st.info("""
+    **逻辑说明：**
+    - Item1 (40%): 累计40% → A类
+    - Item2 (30%): 累计70% → A类
+    - Item3 (20%): 累计90% → **A类**（因为从70%跨越到90%，超过了80%阈值）
+    - Item4 (5%): 累计95% → B类
+    - Item5 (3%): 累计98% → C类
+    - Item6 (2%): 累计100% → C类
+    """)
+
+# ========== 14. 主程序 ==========
 def main():
     st.sidebar.header("⚙️ 系统信息")
     
@@ -528,25 +688,29 @@ def main():
         ### 📋 数据流程
         1. **加载静态映射表** (Google Sheets)
            - Warehouse
-           - Country
-           - Type
-           - Description
+           - Country Code
+           - Type / Description
         
         2. **上传库存数据**
            - 包含"仓库"列
         
         3. **JOIN操作**
            - 库存数据.Warehouse = 映射表.Warehouse
-           - 自动添加Country/Type/Description
+           - 使用 Country Code 划分国家
         
         4. **按国家分析**
-           - US / CA 分开处理
+           - 使用修改后的ABC分类逻辑
+           - 跨越阈值的项归入前一类
         
         5. **保存历史**
            - 分别存入对应国家的历史表
         """)
         
         st.markdown("---")
+        
+        # 添加ABC逻辑演示按钮
+        if st.button("📊 查看ABC分类逻辑演示"):
+            demonstrate_abc_logic()
         
         # 测试连接按钮
         if st.button("🔄 测试Google Sheets连接"):
@@ -597,26 +761,26 @@ def main():
             # ===== 步骤5：按国家分析 =====
             st.subheader("📊 步骤5：生成分析报表")
             
-            # 获取唯一的国家（注意列名可能是Country_x）
-            country_col = 'Country_x' if 'Country_x' in df_with_values.columns else 'Country'
-            
-            if country_col not in df_with_values.columns:
+            # 获取唯一的国家
+            if 'Country' not in df_with_values.columns:
                 st.error("无法获取国家信息，JOIN可能失败")
                 st.stop()
             
-            countries = df_with_values[country_col].unique()
+            countries = df_with_values['Country'].unique()
             countries = [c for c in countries if pd.notna(c)]  # 过滤NaN
             
             if len(countries) == 0:
                 st.error("没有有效的国家数据")
                 st.stop()
             
+            st.success(f"发现 {len(countries)} 个国家: {', '.join(countries)}")
+            
             # 为国家创建标签页
             tabs = st.tabs([f"🇺🇸 {c}" if c == 'US' else f"🇨🇦 {c}" if c == 'CA' else f"🌍 {c}" for c in countries])
             
             for tab, country in zip(tabs, countries):
                 with tab:
-                    country_data = df_with_values[df_with_values[country_col] == country]
+                    country_data = df_with_values[df_with_values['Country'] == country]
                     
                     st.markdown(f"### {country} 库存分析（{len(country_data)} 条记录）")
                     
@@ -629,7 +793,7 @@ def main():
                     st.markdown("#### 报表1：库龄汇总")
                     age_summary = generate_age_summary(df_with_values, country)
                     
-                    if len(age_summary) > 0:
+                    if not age_summary.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             st.dataframe(
@@ -641,14 +805,14 @@ def main():
                                 use_container_width=True
                             )
                         with col2:
-                            if st.button(f"💾 保存", key=f"save_age_{country}"):
+                            if st.button(f"💾 保存库龄汇总", key=f"save_age_{country}"):
                                 save_to_gsheet(age_summary, country, 'age_summary')
                     
                     # 报表2：品牌ABC
                     st.markdown("#### 报表2：品牌ABC分类")
                     brand_abc = generate_brand_abc(df_with_values, country)
                     
-                    if len(brand_abc) > 0:
+                    if not brand_abc.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             st.dataframe(
@@ -662,18 +826,21 @@ def main():
                                 use_container_width=True
                             )
                         with col2:
-                            if st.button(f"💾 保存", key=f"save_brand_{country}"):
+                            if st.button(f"💾 保存品牌ABC", key=f"save_brand_{country}"):
                                 save_to_gsheet(brand_abc, country, 'brand_abc')
                     
                     # 报表3：SKU ABC
                     st.markdown("#### 报表3：SKU ABC分类")
                     sku_abc = generate_sku_abc(df_with_values, country)
                     
-                    if len(sku_abc) > 0:
+                    if not sku_abc.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
+                            display_cols = ['品牌分类', '品牌', 'SKU', '品名', '库存数量', '库存价值', '价值占比', '累计占比', 'SKU分类']
+                            available_cols = [col for col in display_cols if col in sku_abc.columns]
+                            
                             st.dataframe(
-                                sku_abc[['品牌分类', '品牌', 'SKU', '品名', '库存数量', '库存价值', '价值占比', '累计占比', 'SKU分类']].head(100).style.format({
+                                sku_abc[available_cols].head(100).style.format({
                                     '库存数量': '{:,.0f}',
                                     '库存价值': '${:,.2f}',
                                     '价值占比': '{:.2%}',
@@ -683,8 +850,8 @@ def main():
                             )
                             st.caption(f"显示前100条，共{len(sku_abc)}条")
                         with col2:
-                            if st.button(f"💾 保存", key=f"save_sku_{country}"):
-                                save_to_gsheet(sku_abc, country, 'sku_abc')
+                            if st.button(f"💾 保存SKU ABC", key=f"save_sku_{country}"):
+                                save_to_gsheet(sku_abc.head(1000), country, 'sku_abc')
             
         except Exception as e:
             st.error(f"处理数据时出错: {str(e)}")
