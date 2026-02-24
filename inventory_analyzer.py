@@ -7,7 +7,7 @@ import numpy as np
 
 # Page configuration
 st.set_page_config(
-    page_title="Inventory ABC Analysis System",
+    page_title="Inventory Analyzer",
     page_icon="📊",
     layout="wide"
 )
@@ -136,10 +136,8 @@ def load_warehouse_region_mapping():
             col_lower = col.lower()
             if 'warehouse' in col_lower or '仓库' in col_lower:
                 column_mapping[col] = 'Warehouse'
-            elif 'country code' in col_lower or '国家代码' in col_lower:
-                column_mapping[col] = 'Country_Code'
-            elif 'country' in col_lower and 'code' not in col_lower:
-                column_mapping[col] = 'Country_Name'
+            elif 'country' in col_lower or '国家' in col_lower:
+                column_mapping[col] = 'Country'
             elif 'type' in col_lower or '类型' in col_lower:
                 column_mapping[col] = 'Type'
             elif 'description' in col_lower or '描述' in col_lower:
@@ -154,15 +152,15 @@ def load_warehouse_region_mapping():
             st.error("Warehouse column missing in mapping table")
             return None
         
-        if 'Country_Code' not in mapping_df.columns:
-            st.error("Country Code column missing in mapping table")
+        if 'Country' not in mapping_df.columns:
+            st.error("Country column missing in mapping table")
             return None
         
         # Show preview
         with st.expander("View Warehouse Mapping Table"):
             st.dataframe(mapping_df.head())
             st.write(f"Total records: {len(mapping_df)}")
-            st.write(f"Country code distribution: {mapping_df['Country_Code'].value_counts().to_dict()}")
+            st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
         
         return mapping_df
         
@@ -218,13 +216,11 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     mapping_join['_join_key'] = mapping_join['Warehouse'].astype(str).str.strip().str.upper()
     
     # Select needed columns
-    mapping_cols = ['_join_key', 'Country_Code']
+    mapping_cols = ['_join_key', 'Country']
     if 'Type' in mapping_join.columns:
         mapping_cols.append('Type')
     if 'Description' in mapping_join.columns:
         mapping_cols.append('Description')
-    if 'Country_Name' in mapping_join.columns:
-        mapping_cols.append('Country_Name')
     
     # Perform LEFT JOIN
     merged_df = pd.merge(
@@ -236,9 +232,6 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     
     # Remove temporary column
     merged_df = merged_df.drop('_join_key', axis=1)
-    
-    # Rename Country_Code to Country
-    merged_df = merged_df.rename(columns={'Country_Code': 'Country'})
     
     # Calculate match statistics
     total_rows = len(merged_df)
@@ -687,7 +680,8 @@ def main():
         ### 📋 Data Flow
         1. **Load static mapping table** (Google Sheets)
            - Warehouse
-           - Country Code
+           - Country (used for country classification)
+           - Country Code (US/CA/US Local/CA Local)
            - Type / Description
         
         2. **Upload inventory data**
@@ -695,7 +689,7 @@ def main():
         
         3. **JOIN operation**
            - Inventory.Warehouse = Mapping.Warehouse
-           - Use Country Code for country classification
+           - Use Country column for country classification
         
         4. **Analysis by country**
            - Using modified ABC classification logic
