@@ -1,0 +1,32 @@
+# ===== 核心依赖 =====
+streamlit==1.42.0
+pandas==2.2.3
+numpy==2.2.4
+
+# ===== Google Sheets 集成 =====
+gspread==6.2.0
+google-auth==2.38.0
+google-auth-oauthlib==1.2.1     # OAuth 支持
+google-auth-httplib2==0.2.0     # HTTP 客户端
+
+# ===== Excel 文件处理 =====
+openpyxl==3.2.0                  # Excel 2024+ 格式
+xlrd==2.0.1                      # 旧版 Excel 格式
+xlsxwriter==3.2.2                # 写入 Excel 文件（可选）
+
+# ===== 数据可视化（如果后续需要）=====
+plotly==6.0.1                    # 交互式图表
+matplotlib==3.10.1               # 基础图表
+seaborn==0.13.2                  # 统计图表
+
+# ===== 日期时间处理 =====
+python-dateutil==2.9.0
+pytz==2025.2
+
+# ===== 缓存和性能 =====
+cachetools==5.5.2
+
+# ===== 开发工具（可选）=====
+python-dotenv==1.1.0             # 环境变量管理
+pytest==8.3.5                    # 单元测试
+black==25.1.0                    # 代码格式化
