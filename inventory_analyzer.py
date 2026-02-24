@@ -779,7 +779,7 @@ def main():
             st.success(f"Found {len(countries)} countries: {', '.join(countries)}")
             
             # Create tabs for each country
-            tabs = st.tabs([f"🇺🇸 {c}" if c == 'US' else f"🇨🇦 {c}" if c == 'CA' else f"🌍 {c}" for c in countries])
+            tabs = st.tabs([f"{c}" if c == 'US' else f"{c}" if c == 'CA' else f"🌍 {c}" for c in countries])
             
             for tab, country in zip(tabs, countries):
                 with tab:
