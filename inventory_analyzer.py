@@ -128,7 +128,7 @@ def load_warehouse_region_mapping():
         mapping_df = pd.DataFrame(records)
         
         # 确保列名正确
-        expected_columns = ['Warehouse', 'Country', 'Type', 'Description']
+        expected_columns = ['Warehouse','Country Code', 'Country', 'Type', 'Description']
         
         # 检查列是否存在，如果不存在尝试匹配
         actual_columns = mapping_df.columns.tolist()
@@ -150,7 +150,7 @@ def load_warehouse_region_mapping():
             st.error("仓库映射表中缺少Warehouse列")
             return None
         
-        if 'Country' not in mapping_df.columns:
+        if 'Country Code' not in mapping_df.columns:
             st.error("仓库映射表中缺少Country列")
             return None
         
