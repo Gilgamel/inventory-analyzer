@@ -237,9 +237,6 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     # Remove temporary column
     merged_df = merged_df.drop('_join_key', axis=1)
     
-    # Rename Country_Code to Country
-    merged_df = merged_df.rename(columns={'Country_Code': 'Country'})
-    
     # Calculate match statistics
     total_rows = len(merged_df)
     matched_rows = merged_df['Country'].notna().sum()
