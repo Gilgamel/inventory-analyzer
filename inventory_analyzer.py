@@ -102,6 +102,7 @@ def load_warehouse_region_mapping():
     """
     Load static warehouse region mapping table from Google Sheets
     Table structure: Warehouse, Country Code, Type, Description
+    Note: Column name is exactly "Country Code" (with space)
     """
     try:
         client = connect_to_gsheet()
@@ -127,17 +128,21 @@ def load_warehouse_region_mapping():
         # Convert to DataFrame
         mapping_df = pd.DataFrame(records)
         
-        # Standardize column names
+        # Display original column names for debugging
+        st.write("Original column names in mapping table:", list(mapping_df.columns))
+        
+        # Standardize column names (remove extra spaces but preserve the exact name)
         mapping_df.columns = [str(col).strip() for col in mapping_df.columns]
         
-        # Create column mapping
+        # Create column mapping - preserve exact column names
         column_mapping = {}
         for col in mapping_df.columns:
             col_lower = col.lower()
             if 'warehouse' in col_lower or '仓库' in col_lower:
                 column_mapping[col] = 'Warehouse'
             elif 'country code' in col_lower or '国家代码' in col_lower:
-                column_mapping[col] = 'Country_Code'
+                # Keep the exact column name with space
+                column_mapping[col] = 'Country Code'  # Preserve space
             elif 'country' in col_lower and 'code' not in col_lower:
                 column_mapping[col] = 'Country_Name'
             elif 'type' in col_lower or '类型' in col_lower:
@@ -154,15 +159,17 @@ def load_warehouse_region_mapping():
             st.error("Warehouse column missing in mapping table")
             return None
         
-        if 'Country_Code' not in mapping_df.columns:
-            st.error("Country Code column missing in mapping table")
+        # Check for 'Country Code' column (with space)
+        if 'Country Code' not in mapping_df.columns:
+            st.error("'Country Code' column missing in mapping table")
+            st.write("Available columns:", list(mapping_df.columns))
             return None
         
         # Show preview
         with st.expander("View Warehouse Mapping Table"):
             st.dataframe(mapping_df.head())
             st.write(f"Total records: {len(mapping_df)}")
-            st.write(f"Country code distribution: {mapping_df['Country_Code'].value_counts().to_dict()}")
+            st.write(f"Country code distribution: {mapping_df['Country Code'].value_counts().to_dict()}")
         
         return mapping_df
         
@@ -217,8 +224,8 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     inventory_join['_join_key'] = inventory_join[warehouse_col_inventory].astype(str).str.strip().str.upper()
     mapping_join['_join_key'] = mapping_join['Warehouse'].astype(str).str.strip().str.upper()
     
-    # Select needed columns - use Country_Code directly
-    mapping_cols = ['_join_key', 'Country_Code']
+    # Select needed columns - use 'Country Code' directly (with space)
+    mapping_cols = ['_join_key', 'Country Code']
     if 'Type' in mapping_join.columns:
         mapping_cols.append('Type')
     if 'Description' in mapping_join.columns:
@@ -237,15 +244,15 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     # Remove temporary column
     merged_df = merged_df.drop('_join_key', axis=1)
     
-    # NOTE: No renaming of Country_Code to Country - keep as Country_Code
+    # NOTE: Keep the exact column name 'Country Code' (with space)
     
-    # Calculate match statistics using Country_Code
+    # Calculate match statistics using 'Country Code' column
     total_rows = len(merged_df)
-    matched_rows = merged_df['Country_Code'].notna().sum()
+    matched_rows = merged_df['Country Code'].notna().sum()
     match_rate = (matched_rows / total_rows * 100) if total_rows > 0 else 0
     
     # Find unmatched warehouses
-    unmatched_warehouses = merged_df[merged_df['Country_Code'].isna()][warehouse_col_inventory].unique()
+    unmatched_warehouses = merged_df[merged_df['Country Code'].isna()][warehouse_col_inventory].unique()
     
     st.success(f"""
     ✅ JOIN completed!
@@ -262,8 +269,8 @@ def join_with_warehouse_region(inventory_df, mapping_df):
         """)
     
     # Show country code distribution after JOIN
-    if 'Country_Code' in merged_df.columns:
-        country_counts = merged_df['Country_Code'].value_counts()
+    if 'Country Code' in merged_df.columns:
+        country_counts = merged_df['Country Code'].value_counts()
         st.info(f"Country code distribution: {dict(country_counts)}")
     
     return merged_df
@@ -460,10 +467,10 @@ def generate_age_summary(df, country_code):
     """
     Generate age summary report
     """
-    if 'Country_Code' not in df.columns:
+    if 'Country Code' not in df.columns:
         return pd.DataFrame()
     
-    country_df = df[df['Country_Code'] == country_code].copy()
+    country_df = df[df['Country Code'] == country_code].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -498,10 +505,10 @@ def generate_brand_abc(df, country_code):
     """
     Generate brand ABC classification report
     """
-    if 'Country_Code' not in df.columns or 'Brand' not in df.columns:
+    if 'Country Code' not in df.columns or 'Brand' not in df.columns:
         return pd.DataFrame()
     
-    country_df = df[df['Country_Code'] == country_code].copy()
+    country_df = df[df['Country Code'] == country_code].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -538,10 +545,10 @@ def generate_sku_abc(df, country_code):
     """
     Generate SKU ABC classification report
     """
-    if 'Country_Code' not in df.columns:
+    if 'Country Code' not in df.columns:
         return pd.DataFrame()
     
-    country_df = df[df['Country_Code'] == country_code].copy()
+    country_df = df[df['Country Code'] == country_code].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -694,7 +701,7 @@ def main():
         
         3. **JOIN operation**
            - Inventory.Warehouse = Mapping.Warehouse
-           - Use Country Code directly from mapping table
+           - Use 'Country Code' column directly from mapping table
         
         4. **Analysis by country code**
            - Using modified ABC classification logic
@@ -760,11 +767,11 @@ def main():
             st.subheader("📊 Step 5: Generate Analysis Reports")
             
             # Get unique country codes
-            if 'Country_Code' not in df_with_values.columns:
+            if 'Country Code' not in df_with_values.columns:
                 st.error("Unable to get country code information, JOIN may have failed")
                 st.stop()
             
-            country_codes = df_with_values['Country_Code'].unique()
+            country_codes = df_with_values['Country Code'].unique()
             country_codes = [c for c in country_codes if pd.notna(c)]  # Filter NaN
             
             if len(country_codes) == 0:
@@ -778,7 +785,7 @@ def main():
             
             for tab, country_code in zip(tabs, country_codes):
                 with tab:
-                    country_data = df_with_values[df_with_values['Country_Code'] == country_code]
+                    country_data = df_with_values[df_with_values['Country Code'] == country_code]
                     
                     st.markdown(f"### {country_code} Inventory Analysis ({len(country_data)} records)")
                     
