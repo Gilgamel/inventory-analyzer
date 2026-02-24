@@ -1,0 +1,25 @@
+streamlit==1.54.0
+pandas==2.3.3
+numpy==2.4.2
+gspread==6.2.0
+google-auth==2.39.0
+google-auth-oauthlib==1.2.2     # OAuth 支持
+google-auth-httplib2==0.2.0     # HTTP 客户端
+openpyxl==3.1.5                  # Excel 2024+ 格式
+xlsxwriter==3.2.9                # 写入 Excel 文件（可选）
+
+plotly==6.5.0                    # 交互式图表
+matplotlib==3.10.8               # 基础图表
+seaborn==0.13.2                  # 统计图表
+
+# ===== 日期时间处理 =====
+python-dateutil==2.9.0
+pytz==2025.2
+
+# ===== 缓存和性能 =====
+cachetools==6.2.2
+
+# ===== 开发工具（可选）=====
+python-dotenv==1.1.0             # 环境变量管理
+pytest==9.0.2                    # 单元测试
+black==26.1.0                    # 代码格式化
