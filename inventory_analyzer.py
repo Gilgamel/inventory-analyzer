@@ -854,7 +854,7 @@ def main():
                             available_cols = [col for col in display_cols if col in sku_abc.columns]
                             
                             st.dataframe(
-                                sku_abc[available_cols].style.format({
+                                sku_abc[available_cols].head(1000).style.format({
                                     'Inventory Qty': '{:,.0f}',
                                     'Inventory Value': '${:,.2f}',
                                     'Value %': '{:.2%}',
@@ -862,7 +862,7 @@ def main():
                                 }),
                                 use_container_width=True
                             )
-                            st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
+                            st.caption(f"Showing first 1000 rows, total {len(sku_abc)} rows")
                         with col2:
                             if st.button(f"💾 Save SKU ABC", key=f"save_sku_{country}"):
                                 save_to_gsheet(sku_abc.head(1000), country, 'sku_abc')
