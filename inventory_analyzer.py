@@ -101,7 +101,7 @@ def connect_to_gsheet():
 def load_warehouse_region_mapping():
     """
     Load static warehouse region mapping table from Google Sheets
-    Table structure: Warehouse, Country, Type, Description
+    Table structure: Warehouse, Country Code, Type, Description
     """
     try:
         client = connect_to_gsheet()
@@ -217,7 +217,7 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     inventory_join['_join_key'] = inventory_join[warehouse_col_inventory].astype(str).str.strip().str.upper()
     mapping_join['_join_key'] = mapping_join['Warehouse'].astype(str).str.strip().str.upper()
     
-    # Select needed columns
+    # Select needed columns - use Country_Code directly
     mapping_cols = ['_join_key', 'Country_Code']
     if 'Type' in mapping_join.columns:
         mapping_cols.append('Type')
@@ -237,16 +237,15 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     # Remove temporary column
     merged_df = merged_df.drop('_join_key', axis=1)
     
-    # Rename Country_Code to Country
-    merged_df = merged_df.rename(columns={'Country_Code': 'Country'})
+    # NOTE: No renaming of Country_Code to Country - keep as Country_Code
     
-    # Calculate match statistics
+    # Calculate match statistics using Country_Code
     total_rows = len(merged_df)
-    matched_rows = merged_df['Country'].notna().sum()
+    matched_rows = merged_df['Country_Code'].notna().sum()
     match_rate = (matched_rows / total_rows * 100) if total_rows > 0 else 0
     
     # Find unmatched warehouses
-    unmatched_warehouses = merged_df[merged_df['Country'].isna()][warehouse_col_inventory].unique()
+    unmatched_warehouses = merged_df[merged_df['Country_Code'].isna()][warehouse_col_inventory].unique()
     
     st.success(f"""
     ✅ JOIN completed!
@@ -262,10 +261,10 @@ def join_with_warehouse_region(inventory_df, mapping_df):
         {', etc' if len(unmatched_warehouses) > 10 else ''}
         """)
     
-    # Show country distribution after JOIN
-    if 'Country' in merged_df.columns:
-        country_counts = merged_df['Country'].value_counts()
-        st.info(f"Country distribution: {dict(country_counts)}")
+    # Show country code distribution after JOIN
+    if 'Country_Code' in merged_df.columns:
+        country_counts = merged_df['Country_Code'].value_counts()
+        st.info(f"Country code distribution: {dict(country_counts)}")
     
     return merged_df
 
@@ -457,14 +456,14 @@ def abc_classification(df, value_col, group_col=None):
         return sorted_df
 
 # ========== 9. Generate Report 1: Age Summary ==========
-def generate_age_summary(df, country):
+def generate_age_summary(df, country_code):
     """
     Generate age summary report
     """
-    if 'Country' not in df.columns:
+    if 'Country_Code' not in df.columns:
         return pd.DataFrame()
     
-    country_df = df[df['Country'] == country].copy()
+    country_df = df[df['Country_Code'] == country_code].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -495,14 +494,14 @@ def generate_age_summary(df, country):
     return summary_df
 
 # ========== 10. Generate Report 2: Brand ABC Classification ==========
-def generate_brand_abc(df, country):
+def generate_brand_abc(df, country_code):
     """
     Generate brand ABC classification report
     """
-    if 'Country' not in df.columns or 'Brand' not in df.columns:
+    if 'Country_Code' not in df.columns or 'Brand' not in df.columns:
         return pd.DataFrame()
     
-    country_df = df[df['Country'] == country].copy()
+    country_df = df[df['Country_Code'] == country_code].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -535,14 +534,14 @@ def generate_brand_abc(df, country):
     return brand_abc
 
 # ========== 11. Generate Report 3: SKU ABC Classification ==========
-def generate_sku_abc(df, country):
+def generate_sku_abc(df, country_code):
     """
     Generate SKU ABC classification report
     """
-    if 'Country' not in df.columns:
+    if 'Country_Code' not in df.columns:
         return pd.DataFrame()
     
-    country_df = df[df['Country'] == country].copy()
+    country_df = df[df['Country_Code'] == country_code].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -561,7 +560,7 @@ def generate_sku_abc(df, country):
         return pd.DataFrame()
     
     # Get brand classification
-    brand_abc = generate_brand_abc(df, country)
+    brand_abc = generate_brand_abc(df, country_code)
     if len(brand_abc) > 0 and 'Brand' in brand_abc.columns:
         brand_class_map = dict(zip(brand_abc['Brand'], brand_abc['Brand Class']))
         sku_data['Brand Class'] = sku_data['Brand'].map(brand_class_map)
@@ -585,7 +584,7 @@ def generate_sku_abc(df, country):
     return sku_abc
 
 # ========== 12. Save to Google Sheets ==========
-def save_to_gsheet(data_df, country, analysis_type):
+def save_to_gsheet(data_df, country_code, analysis_type):
     """
     Save data to corresponding country's Google Sheets history table
     """
@@ -599,12 +598,12 @@ def save_to_gsheet(data_df, country, analysis_type):
         data_df['Analysis Date'] = datetime.now().strftime('%Y-%m-%d')
         data_df['Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # Select history table based on country
-        sheet_id_key = f"{country}_history_sheet_id"
+        # Select history table based on country code
+        sheet_id_key = f"{country_code}_history_sheet_id"
         sheet_id = st.secrets["sheets"].get(sheet_id_key)
         
         if not sheet_id:
-            st.error(f"No history table configured for {country}")
+            st.error(f"No history table configured for {country_code}")
             return False
         
         # Open sheet
@@ -635,7 +634,7 @@ def save_to_gsheet(data_df, country, analysis_type):
             batch = records[i:i+batch_size]
             worksheet.append_rows(batch, value_input_option='USER_ENTERED')
         
-        st.success(f"✅ {country} {analysis_type} data saved to history table")
+        st.success(f"✅ {country_code} {analysis_type} data saved to history table")
         return True
         
     except Exception as e:
@@ -687,7 +686,7 @@ def main():
         ### 📋 Data Flow
         1. **Load static mapping table** (Google Sheets)
            - Warehouse
-           - Country Code
+           - Country Code (used for country classification)
            - Type / Description
         
         2. **Upload inventory data**
@@ -695,14 +694,14 @@ def main():
         
         3. **JOIN operation**
            - Inventory.Warehouse = Mapping.Warehouse
-           - Use Country Code for country classification
+           - Use Country Code directly from mapping table
         
-        4. **Analysis by country**
+        4. **Analysis by country code**
            - Using modified ABC classification logic
            - Items crossing thresholds included in previous class
         
         5. **Save history**
-           - Save to respective country history tables
+           - Save to respective country code history tables
         """)
         
         st.markdown("---")
@@ -757,31 +756,31 @@ def main():
             st.subheader("💰 Step 4: Calculate Inventory Value")
             df_with_values = calculate_age_band_values(df_processed)
             
-            # ===== Step 5: Analysis by country =====
+            # ===== Step 5: Analysis by country code =====
             st.subheader("📊 Step 5: Generate Analysis Reports")
             
-            # Get unique countries
-            if 'Country' not in df_with_values.columns:
-                st.error("Unable to get country information, JOIN may have failed")
+            # Get unique country codes
+            if 'Country_Code' not in df_with_values.columns:
+                st.error("Unable to get country code information, JOIN may have failed")
                 st.stop()
             
-            countries = df_with_values['Country'].unique()
-            countries = [c for c in countries if pd.notna(c)]  # Filter NaN
+            country_codes = df_with_values['Country_Code'].unique()
+            country_codes = [c for c in country_codes if pd.notna(c)]  # Filter NaN
             
-            if len(countries) == 0:
-                st.error("No valid country data")
+            if len(country_codes) == 0:
+                st.error("No valid country code data")
                 st.stop()
             
-            st.success(f"Found {len(countries)} countries: {', '.join(countries)}")
+            st.success(f"Found {len(country_codes)} country codes: {', '.join(country_codes)}")
             
-            # Create tabs for each country
-            tabs = st.tabs([f"🇺🇸 {c}" if c == 'US' else f"🇨🇦 {c}" if c == 'CA' else f"🌍 {c}" for c in countries])
+            # Create tabs for each country code
+            tabs = st.tabs([f"🇺🇸 {c}" if c == 'US' else f"🇨🇦 {c}" if c == 'CA' else f"🌍 {c}" for c in country_codes])
             
-            for tab, country in zip(tabs, countries):
+            for tab, country_code in zip(tabs, country_codes):
                 with tab:
-                    country_data = df_with_values[df_with_values['Country'] == country]
+                    country_data = df_with_values[df_with_values['Country_Code'] == country_code]
                     
-                    st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records)")
+                    st.markdown(f"### {country_code} Inventory Analysis ({len(country_data)} records)")
                     
                     # Display warehouse type distribution if available
                     if 'Type' in country_data.columns:
@@ -790,7 +789,7 @@ def main():
                     
                     # Report 1: Age Summary
                     st.markdown("#### Report 1: Age Summary")
-                    age_summary = generate_age_summary(df_with_values, country)
+                    age_summary = generate_age_summary(df_with_values, country_code)
                     
                     if not age_summary.empty:
                         col1, col2 = st.columns([3, 1])
@@ -804,12 +803,12 @@ def main():
                                 use_container_width=True
                             )
                         with col2:
-                            if st.button(f"💾 Save Age Summary", key=f"save_age_{country}"):
-                                save_to_gsheet(age_summary, country, 'age_summary')
+                            if st.button(f"💾 Save Age Summary", key=f"save_age_{country_code}"):
+                                save_to_gsheet(age_summary, country_code, 'age_summary')
                     
                     # Report 2: Brand ABC
                     st.markdown("#### Report 2: Brand ABC Classification")
-                    brand_abc = generate_brand_abc(df_with_values, country)
+                    brand_abc = generate_brand_abc(df_with_values, country_code)
                     
                     if not brand_abc.empty:
                         col1, col2 = st.columns([3, 1])
@@ -825,12 +824,12 @@ def main():
                                 use_container_width=True
                             )
                         with col2:
-                            if st.button(f"💾 Save Brand ABC", key=f"save_brand_{country}"):
-                                save_to_gsheet(brand_abc, country, 'brand_abc')
+                            if st.button(f"💾 Save Brand ABC", key=f"save_brand_{country_code}"):
+                                save_to_gsheet(brand_abc, country_code, 'brand_abc')
                     
                     # Report 3: SKU ABC
                     st.markdown("#### Report 3: SKU ABC Classification")
-                    sku_abc = generate_sku_abc(df_with_values, country)
+                    sku_abc = generate_sku_abc(df_with_values, country_code)
                     
                     if not sku_abc.empty:
                         col1, col2 = st.columns([3, 1])
@@ -849,8 +848,8 @@ def main():
                             )
                             st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
                         with col2:
-                            if st.button(f"💾 Save SKU ABC", key=f"save_sku_{country}"):
-                                save_to_gsheet(sku_abc.head(1000), country, 'sku_abc')
+                            if st.button(f"💾 Save SKU ABC", key=f"save_sku_{country_code}"):
+                                save_to_gsheet(sku_abc.head(1000), country_code, 'sku_abc')
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
