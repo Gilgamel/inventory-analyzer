@@ -825,7 +825,7 @@ def main():
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             # 定义列顺序：Brand, Inventory Qty, Inventory Value, SKU Count, Value %, Cumulative %, Brand Class
-                            column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+                            column_order = ['Brand', 'SKU Count', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'Brand Class']
                             # 只保留存在的列
                             display_columns = [col for col in column_order if col in brand_abc.columns]
                             
