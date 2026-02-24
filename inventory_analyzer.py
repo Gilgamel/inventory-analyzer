@@ -515,7 +515,7 @@ def generate_brand_abc(df, country):
         'Total_Inventory': 'sum'
     }).rename(columns={
         'SKU': 'SKU Count',
-        'Total_Inventory': 'Total Qty'
+        'Total_Inventory': 'Inventory Qty'  # 修改：将 'Total Qty' 改为 'Inventory Qty'
     }).reset_index()
     
     brand_summary = brand_summary[brand_summary['Total_Value'] > 0]
@@ -824,11 +824,16 @@ def main():
                     if not brand_abc.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
+                            # 定义列顺序：Brand, Inventory Qty, Inventory Value, SKU Count, Value %, Cumulative %, Brand Class
+                            column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+                            # 只保留存在的列
+                            display_columns = [col for col in column_order if col in brand_abc.columns]
+                            
                             st.dataframe(
-                                brand_abc.style.format({
-                                    'SKU Count': '{:,.0f}',
+                                brand_abc[display_columns].style.format({
+                                    'Inventory Qty': '{:,.0f}',
                                     'Inventory Value': '${:,.2f}',
-                                    'Total Qty': '{:,.0f}',
+                                    'SKU Count': '{:,.0f}',
                                     'Value %': '{:.2%}',
                                     'Cumulative %': '{:.2%}'
                                 }),
