@@ -826,8 +826,8 @@ def main():
                         with col1:
                             st.dataframe(
                                 brand_abc.style.format({
-                                    'Inventory Value': '${:,.2f}',
                                     'SKU Count': '{:,.0f}',
+                                    'Inventory Value': '${:,.2f}',
                                     'Total Qty': '{:,.0f}',
                                     'Value %': '{:.2%}',
                                     'Cumulative %': '{:.2%}'
