@@ -20,7 +20,7 @@ st.markdown("---")
 COLUMN_MAPPING = {
     '品名': 'Product_Name',
     'SKU': 'SKU',
-    '仓库': 'Warehouse',
+    '仓库': 'Warehouse_Original',  # 先映射为临时列名，避免冲突
     '数据层级': 'Data_Level',
     '分类': 'Category',
     '品牌': 'Brand',
@@ -97,7 +97,7 @@ def connect_to_gsheet():
         return None
 
 # ========== 4. 加载静态 Warehouse Region 映射表 ==========
-@st.cache_data(ttl=3600)  # 缓存1小时
+@st.cache_data(ttl=3600)
 def load_warehouse_region_mapping():
     """
     从Google Sheets加载静态的仓库区域映射表
@@ -108,57 +108,59 @@ def load_warehouse_region_mapping():
         if client is None:
             return None
         
-        # 从secrets获取映射表的Sheet ID
         mapping_sheet_id = st.secrets["sheets"]["warehouse_region_sheet_id"]
-        
-        # 打开映射表
         sheet = client.open_by_key(mapping_sheet_id)
-        
-        # 获取第一个工作表
         worksheet = sheet.sheet1
-        
-        # 获取所有记录
         records = worksheet.get_all_records()
         
         if not records:
             st.warning("仓库映射表为空")
             return None
         
-        # 转换为DataFrame
         mapping_df = pd.DataFrame(records)
         
-        # 标准化列名：去除空格，转为标题格式
+        # 标准化列名：去除空格
         mapping_df.columns = [str(col).strip() for col in mapping_df.columns]
         
-        # 创建列名映射（处理可能的不同命名方式）
-        column_mapping = {}
+        # 创建新的列名映射
+        new_columns = {}
         for col in mapping_df.columns:
-            col_lower = col.lower().replace(' ', '_')
+            col_lower = col.lower()
             if 'warehouse' in col_lower or '仓库' in col:
-                column_mapping[col] = 'Warehouse'
-            elif 'country_code' in col_lower or 'country code' in col_lower or '国家代码' in col:
-                column_mapping[col] = 'Country_Code'
-            elif 'country' in col_lower and 'code' not in col_lower or '国家' in col:
-                column_mapping[col] = 'Country_Name'
-            elif 'type' in col_lower or '类型' in col:
-                column_mapping[col] = 'Type'
-            elif 'description' in col_lower or '描述' in col:
-                column_mapping[col] = 'Description'
+                new_columns[col] = 'Warehouse'
+            elif 'country code' in col_lower or '国家代码' in col_lower:
+                new_columns[col] = 'Country_Code'
+            elif 'country' in col_lower and 'code' not in col_lower:
+                new_columns[col] = 'Country_Name'
+            elif 'type' in col_lower or '类型' in col_lower:
+                new_columns[col] = 'Type'
+            elif 'description' in col_lower or '描述' in col_lower:
+                new_columns[col] = 'Description'
         
-        # 重命名列
-        if column_mapping:
-            mapping_df = mapping_df.rename(columns=column_mapping)
+        if new_columns:
+            mapping_df = mapping_df.rename(columns=new_columns)
         
-        # 确保必要的列存在
+        # 检查必要列
         if 'Warehouse' not in mapping_df.columns:
-            st.error("仓库映射表中缺少Warehouse列")
-            st.write("当前列名:", list(mapping_df.columns))
+            st.error("仓库映射表中找不到Warehouse列")
+            st.write("现有列名:", list(mapping_df.columns))
             return None
         
-        if 'Country_Code' not in mapping_df.columns:
-            st.error("仓库映射表中缺少Country Code列")
-            st.write("当前列名:", list(mapping_df.columns))
+        # 查找Country Code列（可能是多种命名）
+        country_code_col = None
+        for col in mapping_df.columns:
+            if col in ['Country_Code', 'Country Code', '国家代码']:
+                country_code_col = col
+                break
+        
+        if country_code_col is None:
+            st.error("仓库映射表中找不到Country Code列")
+            st.write("现有列名:", list(mapping_df.columns))
             return None
+        
+        # 重命名为统一的Country_Code
+        if country_code_col != 'Country_Code':
+            mapping_df = mapping_df.rename(columns={country_code_col: 'Country_Code'})
         
         # 显示预览
         with st.expander("查看仓库映射表"):
@@ -172,62 +174,44 @@ def load_warehouse_region_mapping():
         st.error(f"加载仓库映射表失败: {str(e)}")
         return None
 
-# ========== 5. JOIN库存数据和仓库映射表（使用Country Code）==========
+# ========== 5. JOIN库存数据和仓库映射表 ==========
 def join_with_warehouse_region(inventory_df, mapping_df):
     """
     将库存数据与仓库区域表进行JOIN
-    基于Warehouse列进行匹配，使用Country Code作为国家标识
     """
     if mapping_df is None or len(mapping_df) == 0:
         st.error("仓库映射表为空，无法进行JOIN")
         return inventory_df
     
-    # 确保库存数据有仓库列
+    # 在库存数据中查找仓库列
     warehouse_col_inventory = None
-    
-    # 检查是否已经有Warehouse列（通过列名映射后）
-    if 'Warehouse' in inventory_df.columns:
-        warehouse_col_inventory = 'Warehouse'
-    else:
-        # 尝试查找包含"仓库"的列
-        for col in inventory_df.columns:
-            if '仓库' in col or 'warehouse' in col.lower():
-                warehouse_col_inventory = col
-                break
+    for col in inventory_df.columns:
+        if '仓库' in col or 'warehouse' in col.lower():
+            warehouse_col_inventory = col
+            break
     
     if warehouse_col_inventory is None:
-        st.error("库存数据中找不到仓库列，无法进行JOIN")
-        return inventory_df
-    
-    # 确保映射表有必要的列
-    if 'Warehouse' not in mapping_df.columns:
-        st.error("映射表中缺少Warehouse列")
-        return inventory_df
-    
-    if 'Country_Code' not in mapping_df.columns:
-        st.error("映射表中缺少Country Code列")
+        st.error("库存数据中找不到仓库列")
+        st.write("库存数据列名:", list(inventory_df.columns))
         return inventory_df
     
     st.info(f"""
     **JOIN信息:**
-    - 左表(库存): {warehouse_col_inventory}
-    - 右表(映射): Warehouse
-    - 国家标识: Country Code
-    - JOIN类型: LEFT JOIN
+    - 库存数据仓库列: {warehouse_col_inventory}
+    - 映射表仓库列: Warehouse
+    - 国家标识: Country_Code
     """)
     
     # 准备数据
     inventory_join = inventory_df.copy()
     mapping_join = mapping_df.copy()
     
-    # 将仓库列转换为字符串并去除空格，确保匹配
+    # 创建JOIN键（统一转为大写并去除空格）
     inventory_join['_join_key'] = inventory_join[warehouse_col_inventory].astype(str).str.strip().str.upper()
     mapping_join['_join_key'] = mapping_join['Warehouse'].astype(str).str.strip().str.upper()
     
-    # 选择需要的列从映射表
+    # 选择需要的列
     mapping_cols = ['_join_key', 'Country_Code']
-    
-    # 如果有其他列，也包含进来
     if 'Type' in mapping_join.columns:
         mapping_cols.append('Type')
     if 'Description' in mapping_join.columns:
@@ -246,7 +230,7 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     # 删除临时列
     merged_df = merged_df.drop('_join_key', axis=1)
     
-    # 重命名Country Code为标准列名
+    # 重命名Country_Code为Country
     merged_df = merged_df.rename(columns={'Country_Code': 'Country'})
     
     # 统计匹配情况
@@ -254,69 +238,31 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     matched_rows = merged_df['Country'].notna().sum()
     match_rate = (matched_rows / total_rows * 100) if total_rows > 0 else 0
     
-    # 找出未匹配的仓库
-    unmatched_warehouses = merged_df[merged_df['Country'].isna()][warehouse_col_inventory].unique()
-    
     st.success(f"""
     ✅ JOIN完成！
     - 总记录数: {total_rows}
     - 匹配成功: {matched_rows} ({match_rate:.1f}%)
-    - 未匹配: {total_rows - matched_rows}
     """)
     
-    if len(unmatched_warehouses) > 0:
-        st.warning(f"""
-        ⚠️ 以下仓库未在映射表中找到:
-        {', '.join([str(w) for w in unmatched_warehouses[:10]])}
-        {', 等' if len(unmatched_warehouses) > 10 else ''}
-        """)
-    
-    # 显示JOIN后的国家分布
-    if 'Country' in merged_df.columns:
-        country_counts = merged_df['Country'].value_counts()
-        st.info(f"国家分布: {dict(country_counts)}")
+    # 显示未匹配的仓库
+    if matched_rows < total_rows:
+        unmatched = merged_df[merged_df['Country'].isna()][warehouse_col_inventory].unique()
+        st.warning(f"未匹配的仓库: {', '.join([str(w) for w in unmatched[:10]])}")
     
     return merged_df
 
-# ========== 6. 验证国家代码 ==========
-def validate_country_codes(df):
-    """
-    验证国家代码的有效性
-    """
-    if 'Country' not in df.columns:
-        return df
-    
-    # 定义有效的两字母国家代码
-    valid_country_codes = [
-        'US', 'CA', 'MX', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'CN',
-        'AU', 'BR', 'IN', 'RU', 'ZA', 'KR', 'SG', 'AE', 'SA', 'NL',
-        'BE', 'CH', 'SE', 'NO', 'DK', 'FI', 'PL', 'CZ', 'HU', 'AT'
-    ]
-    
-    # 获取唯一的国家代码
-    unique_countries = df['Country'].dropna().unique()
-    
-    # 找出无效的国家代码
-    invalid_countries = [c for c in unique_countries if c not in valid_country_codes and pd.notna(c)]
-    
-    if invalid_countries:
-        st.warning(f"发现非标准国家代码: {invalid_countries}")
-        
-        # 显示这些记录的示例
-        for country in invalid_countries:
-            sample_records = df[df['Country'] == country].head(3)
-            st.write(f"'{country}' 的示例记录:")
-            st.dataframe(sample_records[['Warehouse', 'Country']].head())
-    
-    return df
-
-# ========== 7. 数据预处理函数 ==========
+# ========== 6. 数据预处理函数 ==========
 def preprocess_data(df):
     """
     数据预处理：重命名列名
     """
+    # 创建副本避免修改原数据
+    df_copy = df.copy()
+    
     # 重命名列
-    df_renamed = df.rename(columns=COLUMN_MAPPING)
+    for chinese_name, english_name in COLUMN_MAPPING.items():
+        if chinese_name in df_copy.columns:
+            df_copy = df_copy.rename(columns={chinese_name: english_name})
     
     # 确保数值列为数字类型
     numeric_cols = ['Total_Inventory', 'Available_Qty', 'Reserved_Qty', 'Defect_Qty',
@@ -329,21 +275,21 @@ def preprocess_data(df):
         numeric_cols.extend(band['cost_cols'])
     
     for col in numeric_cols:
-        if col in df_renamed.columns:
-            df_renamed[col] = pd.to_numeric(df_renamed[col], errors='coerce').fillna(0)
+        if col in df_copy.columns:
+            df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(0)
     
-    return df_renamed
+    return df_copy
 
-# ========== 8. 计算各库龄段库存价值 ==========
+# ========== 7. 计算各库龄段库存价值 ==========
 def calculate_age_band_values(df):
     """
     计算每个SKU在各库龄段的库存价值
     """
     result = df.copy()
     
-    # 计算每个库龄段的总价值
     for band in AGE_BANDS:
         band_name = band['name']
+        
         # 计算该库龄段的总成本
         cost_cols = [col for col in band['cost_cols'] if col in df.columns]
         if cost_cols:
@@ -359,16 +305,22 @@ def calculate_age_band_values(df):
             result[f'{band_name}_Qty'] = 0
     
     # 计算总库存价值
-    value_cols = [f"{band['name']}_Value" for band in AGE_BANDS]
-    result['Total_Value'] = result[value_cols].sum(axis=1)
+    value_cols = [f"{band['name']}_Value" for band in AGE_BANDS if f"{band['name']}_Value" in result.columns]
+    if value_cols:
+        result['Total_Value'] = result[value_cols].sum(axis=1)
+    else:
+        result['Total_Value'] = 0
     
     return result
 
-# ========== 9. ABC分类函数 ==========
+# ========== 8. ABC分类函数 ==========
 def abc_classification(df, value_col, group_col=None):
     """
     ABC分类函数
     """
+    if df.empty or value_col not in df.columns:
+        return df
+    
     if group_col and group_col in df.columns:
         result_dfs = []
         for group, group_df in df.groupby(group_col):
@@ -413,13 +365,15 @@ def abc_classification(df, value_col, group_col=None):
         
         return sorted_df
 
-# ========== 10. 生成报表1：库龄汇总 ==========
+# ========== 9. 生成报表1：库龄汇总 ==========
 def generate_age_summary(df, country):
     """
     生成库龄汇总报表
     """
-    # 使用Country列进行筛选
-    country_df = df[df['Country'] == country].copy() if 'Country' in df.columns else df
+    if 'Country' not in df.columns:
+        return pd.DataFrame()
+    
+    country_df = df[df['Country'] == country].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
@@ -440,20 +394,26 @@ def generate_age_summary(df, country):
                 '库存价值': total_value
             })
     
+    if not age_summary:
+        return pd.DataFrame()
+    
     summary_df = pd.DataFrame(age_summary)
     total_value = summary_df['库存价值'].sum()
     summary_df['价值占比'] = (summary_df['库存价值'] / total_value * 100).round(2)
     
     return summary_df
 
-# ========== 11. 生成报表2：品牌ABC分类 ==========
+# ========== 10. 生成报表2：品牌ABC分类 ==========
 def generate_brand_abc(df, country):
     """
     生成品牌ABC分类报表
     """
-    country_df = df[df['Country'] == country].copy() if 'Country' in df.columns else df
+    if 'Country' not in df.columns or 'Brand' not in df.columns:
+        return pd.DataFrame()
     
-    if len(country_df) == 0 or 'Brand' not in country_df.columns:
+    country_df = df[df['Country'] == country].copy()
+    
+    if len(country_df) == 0:
         return pd.DataFrame()
     
     brand_summary = country_df.groupby('Brand').agg({
@@ -480,40 +440,45 @@ def generate_brand_abc(df, country):
         'abc_class': '品牌分类'
     })
     
-    # 按价值占比从高到低排序
-    brand_abc = brand_abc.sort_values('价值占比', ascending=False)
-    
-    return brand_abc
+    return brand_abc.sort_values('价值占比', ascending=False)
 
-# ========== 12. 生成报表3：SKU ABC分类 ==========
+# ========== 11. 生成报表3：SKU ABC分类 ==========
 def generate_sku_abc(df, country):
     """
     生成SKU ABC分类报表
     """
-    country_df = df[df['Country'] == country].copy() if 'Country' in df.columns else df
+    if 'Country' not in df.columns:
+        return pd.DataFrame()
+    
+    country_df = df[df['Country'] == country].copy()
     
     if len(country_df) == 0:
         return pd.DataFrame()
     
     # 准备SKU级数据
-    sku_data = country_df[['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Inventory']].copy()
+    sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Inventory']
+    available_cols = [col for col in sku_cols if col in country_df.columns]
+    
+    if not available_cols:
+        return pd.DataFrame()
+    
+    sku_data = country_df[available_cols].copy()
     sku_data = sku_data[sku_data['Total_Value'] > 0]
     
     if len(sku_data) == 0:
         return pd.DataFrame()
     
-    # 先获取品牌分类
+    # 获取品牌分类
     brand_abc = generate_brand_abc(df, country)
-    if len(brand_abc) > 0:
+    if len(brand_abc) > 0 and '品牌' in brand_abc.columns:
         brand_class_map = dict(zip(brand_abc['品牌'], brand_abc['品牌分类']))
         sku_data['品牌分类'] = sku_data['Brand'].map(brand_class_map)
     else:
         sku_data['品牌分类'] = '未分类'
     
-    # 对每个品牌内的SKU进行ABC分类
+    # SKU级ABC分类
     sku_abc = abc_classification(sku_data, 'Total_Value', group_col='Brand')
     
-    # 重命名列
     sku_abc = sku_abc.rename(columns={
         'Brand': '品牌',
         'SKU': 'SKU',
@@ -525,12 +490,9 @@ def generate_sku_abc(df, country):
         'abc_class': 'SKU分类'
     })
     
-    # 按库存价值从高到低排序
-    sku_abc = sku_abc.sort_values('库存价值', ascending=False)
-    
-    return sku_abc
+    return sku_abc.sort_values('库存价值', ascending=False)
 
-# ========== 13. 保存到Google Sheets ==========
+# ========== 12. 保存到Google Sheets ==========
 def save_to_gsheet(data_df, country, analysis_type):
     """
     将数据保存到对应国家的Google Sheets历史表
@@ -540,11 +502,10 @@ def save_to_gsheet(data_df, country, analysis_type):
         if client is None:
             return False
         
-        # 添加时间戳
+        data_df = data_df.copy()
         data_df['分析日期'] = datetime.now().strftime('%Y-%m-%d')
         data_df['时间戳'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # 根据国家选择对应的历史表
         sheet_id_key = f"{country}_history_sheet_id"
         sheet_id = st.secrets["sheets"].get(sheet_id_key)
         
@@ -552,74 +513,48 @@ def save_to_gsheet(data_df, country, analysis_type):
             st.error(f"未配置{country}的历史数据表")
             return False
         
-        # 打开sheet
         sheet = client.open_by_key(sheet_id)
-        
-        # 创建工作表名称：分析类型_年月
         worksheet_name = f"{analysis_type}_{datetime.now().strftime('%Y%m')}"
         
         try:
-            # 尝试获取现有工作表
             worksheet = sheet.worksheet(worksheet_name)
-            # 清空现有内容
             worksheet.clear()
         except:
-            # 如果不存在，创建新的
             worksheet = sheet.add_worksheet(title=worksheet_name, rows=1000, cols=30)
         
-        # 转换为列表格式
         headers = data_df.columns.tolist()
         records = data_df.values.tolist()
         
-        # 写入标题
         worksheet.append_row(headers)
         
-        # 写入数据（分批写入）
         batch_size = 100
         for i in range(0, len(records), batch_size):
             batch = records[i:i+batch_size]
             worksheet.append_rows(batch, value_input_option='USER_ENTERED')
         
-        st.success(f"✅ {country} {analysis_type} 数据已保存到历史表")
+        st.success(f"✅ {country} {analysis_type} 数据已保存")
         return True
         
     except Exception as e:
         st.error(f"保存失败: {str(e)}")
         return False
 
-# ========== 14. 主程序 ==========
+# ========== 13. 主程序 ==========
 def main():
     st.sidebar.header("⚙️ 系统信息")
     
-    # 显示系统架构图
     with st.sidebar:
         st.markdown("""
         ### 📋 数据流程
         1. **加载静态映射表** (Google Sheets)
-           - Warehouse
-           - Country Code (用于划分国家)
-           - Type / Description
-        
         2. **上传库存数据**
-           - 包含"仓库"列
-        
-        3. **JOIN操作**
-           - 库存数据.Warehouse = 映射表.Warehouse
-           - 使用 Country Code 作为国家标识
-        
-        4. **按国家分析**
-           - 基于 Country Code 分组
-        
-        5. **保存历史**
-           - 分别存入对应国家的历史表
+        3. **JOIN操作** (基于仓库代码)
+        4. **使用 Country Code 划分国家**
+        5. **生成分析报表**
         """)
         
-        st.markdown("---")
+        debug_mode = st.checkbox("🔧 调试模式", value=True)
         
-        # 调试模式开关
-        debug_mode = st.sidebar.checkbox("🔧 调试模式", value=True)
-        
-        # 测试连接按钮
         if st.button("🔄 测试Google Sheets连接"):
             client = connect_to_gsheet()
             if client:
@@ -627,12 +562,10 @@ def main():
             else:
                 st.error("❌ 连接失败")
     
-    # 主内容区
     st.subheader("📤 上传库存数据文件")
     inventory_file = st.file_uploader(
         "请上传Excel格式的库存报表",
-        type=['xlsx', 'xls'],
-        help="上传包含SKU、品牌、仓库、库龄等信息的库存报表"
+        type=['xlsx', 'xls']
     )
     
     if inventory_file:
@@ -643,87 +576,65 @@ def main():
             with st.expander("查看原始数据预览"):
                 st.dataframe(df.head())
                 st.write(f"总行数: {len(df)}")
-                st.write(f"列名: {list(df.columns)}")
+                st.write(f"原始列名: {list(df.columns)}")
             
-            # ===== 步骤1：加载静态仓库映射表 =====
-            st.subheader("🗺️ 步骤1：加载仓库区域映射表")
+            # 步骤1：加载仓库映射表
+            st.subheader("🗺️ 步骤1：加载仓库映射表")
             mapping_df = load_warehouse_region_mapping()
             
             if mapping_df is None:
-                st.error("无法加载仓库映射表，请检查Google Sheets配置")
+                st.error("无法加载仓库映射表")
                 st.stop()
             
-            # ===== 步骤2：JOIN操作 =====
-            st.subheader("🔗 步骤2：JOIN库存数据与仓库映射表")
+            # 步骤2：JOIN操作
+            st.subheader("🔗 步骤2：JOIN操作")
             df_with_region = join_with_warehouse_region(df, mapping_df)
             
-            # ===== 调试信息 =====
+            # 调试信息
             if debug_mode:
                 st.subheader("🔍 调试信息")
-                col1, col2 = st.columns(2)
+                st.write("**JOIN后的列名:**", list(df_with_region.columns))
                 
-                with col1:
-                    st.write("**JOIN后的列:**")
-                    st.write(list(df_with_region.columns))
-                
-                with col2:
-                    if 'Country' in df_with_region.columns:
-                        st.write("**国家代码分布:**")
-                        country_counts = df_with_region['Country'].value_counts()
-                        st.write(country_counts)
-                        
-                        # 显示每个国家的记录数
-                        st.write("**国家代码统计:**")
-                        for country, count in country_counts.items():
-                            st.write(f"  - {country}: {count} 条记录")
-                
-                # 验证国家代码
-                df_with_region = validate_country_codes(df_with_region)
+                if 'Country' in df_with_region.columns:
+                    st.write("**国家代码分布:**")
+                    country_counts = df_with_region['Country'].value_counts()
+                    st.write(country_counts)
             
-            # ===== 步骤3：数据预处理 =====
+            # 步骤3：数据预处理
             st.subheader("🔄 步骤3：数据预处理")
             df_processed = preprocess_data(df_with_region)
             
-            # ===== 步骤4：计算库龄价值 =====
+            # 步骤4：计算库龄价值
             st.subheader("💰 步骤4：计算库存价值")
             df_with_values = calculate_age_band_values(df_processed)
             
-            # ===== 步骤5：按国家分析 =====
+            # 步骤5：按国家分析
             st.subheader("📊 步骤5：生成分析报表")
             
-            # 获取唯一的国家
             if 'Country' not in df_with_values.columns:
-                st.error("无法获取国家信息，JOIN可能失败")
+                st.error("无法获取国家信息")
                 st.stop()
             
-            countries = df_with_values['Country'].unique()
-            countries = [c for c in countries if pd.notna(c)]  # 过滤NaN
+            countries = df_with_values['Country'].dropna().unique()
             
             if len(countries) == 0:
                 st.error("没有有效的国家数据")
                 st.stop()
             
-            st.success(f"发现 {len(countries)} 个国家/地区: {', '.join(countries)}")
+            st.success(f"发现 {len(countries)} 个国家: {', '.join(countries)}")
             
             # 为国家创建标签页
-            tabs = st.tabs([f"🇺🇸 {c}" if c == 'US' else f"🇨🇦 {c}" if c == 'CA' else f"🌍 {c}" for c in countries])
+            tabs = st.tags = st.tabs([f"🇺🇸 {c}" if c == 'US' else f"🇨🇦 {c}" if c == 'CA' else f"🌍 {c}" for c in countries])
             
             for tab, country in zip(tabs, countries):
                 with tab:
-                    country_data = df_with_values[df_with_values['Country'] == country]
-                    
-                    st.markdown(f"### {country} 库存分析（{len(country_data)} 条记录）")
-                    
-                    # 显示该国家的仓库类型分布（如果有）
-                    if 'Type' in country_data.columns:
-                        type_counts = country_data['Type'].value_counts()
-                        st.info(f"仓库类型分布: {dict(type_counts)}")
+                    st.markdown(f"### {country} 库存分析")
                     
                     # 报表1：库龄汇总
                     st.markdown("#### 报表1：库龄汇总")
                     age_summary = generate_age_summary(df_with_values, country)
                     
-                    if len(age_summary) > 0:
+                    if not age_summary.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             st.dataframe(
@@ -735,14 +646,14 @@ def main():
                                 use_container_width=True
                             )
                         with col2:
-                            if st.button(f"💾 保存", key=f"save_age_{country}"):
+                            if st.button(f"💾 保存库龄汇总", key=f"save_age_{country}"):
                                 save_to_gsheet(age_summary, country, 'age_summary')
                     
                     # 报表2：品牌ABC
                     st.markdown("#### 报表2：品牌ABC分类")
                     brand_abc = generate_brand_abc(df_with_values, country)
                     
-                    if len(brand_abc) > 0:
+                    if not brand_abc.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
                             st.dataframe(
@@ -756,18 +667,21 @@ def main():
                                 use_container_width=True
                             )
                         with col2:
-                            if st.button(f"💾 保存", key=f"save_brand_{country}"):
+                            if st.button(f"💾 保存品牌ABC", key=f"save_brand_{country}"):
                                 save_to_gsheet(brand_abc, country, 'brand_abc')
                     
                     # 报表3：SKU ABC
                     st.markdown("#### 报表3：SKU ABC分类")
                     sku_abc = generate_sku_abc(df_with_values, country)
                     
-                    if len(sku_abc) > 0:
+                    if not sku_abc.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
+                            display_cols = ['品牌分类', '品牌', 'SKU', '品名', '库存数量', '库存价值', '价值占比', '累计占比', 'SKU分类']
+                            available_cols = [col for col in display_cols if col in sku_abc.columns]
+                            
                             st.dataframe(
-                                sku_abc[['品牌分类', '品牌', 'SKU', '品名', '库存数量', '库存价值', '价值占比', '累计占比', 'SKU分类']].head(100).style.format({
+                                sku_abc[available_cols].head(100).style.format({
                                     '库存数量': '{:,.0f}',
                                     '库存价值': '${:,.2f}',
                                     '价值占比': '{:.2%}',
@@ -777,104 +691,12 @@ def main():
                             )
                             st.caption(f"显示前100条，共{len(sku_abc)}条")
                         with col2:
-                            if st.button(f"💾 保存", key=f"save_sku_{country}"):
-                                save_to_gsheet(sku_abc, country, 'sku_abc')
-            
-            # 数据下载按钮
-            st.markdown("---")
-            st.subheader("📥 下载所有分析结果")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                # 合并所有国家的库龄汇总
-                all_age = pd.DataFrame()
-                for country in countries:
-                    age_df = generate_age_summary(df_with_values, country)
-                    if len(age_df) > 0:
-                        age_df['国家'] = country
-                        all_age = pd.concat([all_age, age_df], ignore_index=True)
-                
-                if len(all_age) > 0:
-                    csv = all_age.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(
-                        "📥 下载库龄汇总",
-                        csv,
-                        f"age_summary_all_{datetime.now().strftime('%Y%m%d')}.csv",
-                        "text/csv",
-                        key='download_age_all'
-                    )
-            
-            with col2:
-                # 合并所有国家的品牌ABC
-                all_brand = pd.DataFrame()
-                for country in countries:
-                    brand_df = generate_brand_abc(df_with_values, country)
-                    if len(brand_df) > 0:
-                        brand_df['国家'] = country
-                        all_brand = pd.concat([all_brand, brand_df], ignore_index=True)
-                
-                if len(all_brand) > 0:
-                    csv = all_brand.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(
-                        "📥 下载品牌ABC",
-                        csv,
-                        f"brand_abc_all_{datetime.now().strftime('%Y%m%d')}.csv",
-                        "text/csv",
-                        key='download_brand_all'
-                    )
-            
-            with col3:
-                # 合并所有国家的SKU ABC（只取前1000条避免文件过大）
-                all_sku = pd.DataFrame()
-                for country in countries:
-                    sku_df = generate_sku_abc(df_with_values, country)
-                    if len(sku_df) > 0:
-                        sku_df['国家'] = country
-                        all_sku = pd.concat([all_sku, sku_df.head(200)], ignore_index=True)
-                
-                if len(all_sku) > 0:
-                    csv = all_sku.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(
-                        "📥 下载SKU ABC",
-                        csv,
-                        f"sku_abc_sample_{datetime.now().strftime('%Y%m%d')}.csv",
-                        "text/csv",
-                        key='download_sku_all'
-                    )
+                            if st.button(f"💾 保存SKU ABC", key=f"save_sku_{country}"):
+                                save_to_gsheet(sku_abc.head(1000), country, 'sku_abc')
             
         except Exception as e:
             st.error(f"处理数据时出错: {str(e)}")
             st.exception(e)
-    else:
-        # 显示示例数据格式
-        with st.expander("📋 查看数据格式要求"):
-            st.markdown("""
-            ### 库存数据必需列：
-            - SKU
-            - 品牌
-            - 仓库
-            - 0~30库龄数量 / 0~30库龄成本
-            - 31~60库龄数量 / 31~60库龄成本
-            - 61~90库龄数量 / 61~90库龄成本
-            - 91~180库龄数量 / 91~180库龄成本
-            - 181~270库龄数量 / 181~270库龄成本
-            - 271~330库龄数量 / 271~330库龄成本
-            - 331~365库龄数量 / 331~365库龄成本
-            - 365以上库龄数量 / 365以上库龄成本
-            
-            ### 仓库映射表结构 (Google Sheets)：
-            | Warehouse | Country | Type | Description | Country Code |
-            |-----------|---------|------|-------------|--------------|
-            | US-NY-01 | United States | FBA | New York | US |
-            | CA-TOR-01 | Canada | FBA | Toronto | CA |
-            
-            ### 系统会自动：
-            1. 加载仓库映射表
-            2. 使用 Country Code 划分国家
-            3. 生成三张分析报表
-            4. 支持保存历史数据
-            """)
 
 if __name__ == "__main__":
     main()
