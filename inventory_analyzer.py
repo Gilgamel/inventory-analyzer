@@ -695,14 +695,14 @@ def main():
            - Description
         
         2. **Upload inventory data**
-           - Contains "Warehouse" column
+           - Make sure it contains "Warehouse" column
         
         3. **JOIN operation**
            - Inventory.Warehouse = Mapping.Warehouse
            - Add Country, Warehouse Location, Type, Description
         
         4. **Analysis by country**
-           - Using modified ABC classification logic
+           - Using ABC classification logic
            - Items crossing thresholds included in previous class
         
         5. **Save history**
