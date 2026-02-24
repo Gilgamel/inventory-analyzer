@@ -101,7 +101,7 @@ def connect_to_gsheet():
 def load_warehouse_region_mapping():
     """
     Load static warehouse region mapping table from Google Sheets
-    Table structure: Warehouse, Country Code, Country, Type, Description
+    Table structure: Warehouse, Country, Type, Description
     """
     try:
         client = connect_to_gsheet()
