@@ -854,7 +854,7 @@ def main():
                             available_cols = [col for col in display_cols if col in sku_abc.columns]
                             
                             st.dataframe(
-                                sku_abc[available_cols].head(100).style.format({
+                                sku_abc[available_cols].style.format({
                                     'Inventory Qty': '{:,.0f}',
                                     'Inventory Value': '${:,.2f}',
                                     'Value %': '{:.2%}',
