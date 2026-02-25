@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
+from io import BytesIO
 
 # Page configuration
 st.set_page_config(
@@ -534,6 +535,10 @@ def generate_brand_abc(df, country):
         'abc_class': 'Brand Class'
     })
     
+    # Define column order to match Streamlit display
+    column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+    brand_abc = brand_abc[[col for col in column_order if col in brand_abc.columns]]
+    
     return brand_abc
 
 # ========== 11. Generate Report 3: SKU ABC Classification ==========
@@ -597,65 +602,28 @@ def generate_sku_abc(df, country):
     # Remove temporary sort column
     sku_abc = sku_abc.drop('brand_sort', axis=1)
     
+    # Define column order to match Streamlit display
+    display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
+    sku_abc = sku_abc[[col for col in display_cols if col in sku_abc.columns]]
+    
     return sku_abc
 
-# ========== 12. Save to Google Sheets ==========
-def save_to_gsheet(data_df, country, analysis_type):
+# ========== 12. Function to create Excel download ==========
+def create_excel_download(all_reports):
     """
-    Save data to corresponding country's Google Sheets history table
+    Create an Excel file with multiple sheets from all reports
     """
-    try:
-        client = connect_to_gsheet()
-        if client is None:
-            return False
-        
-        # Add timestamp
-        data_df = data_df.copy()
-        data_df['Analysis Date'] = datetime.now().strftime('%Y-%m-%d')
-        data_df['Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Select history table based on country
-        sheet_id_key = f"{country}_history_sheet_id"
-        sheet_id = st.secrets["sheets"].get(sheet_id_key)
-        
-        if not sheet_id:
-            st.error(f"No history table configured for {country}")
-            return False
-        
-        # Open sheet
-        sheet = client.open_by_key(sheet_id)
-        
-        # Create worksheet name: analysis_type_YYYYMM
-        worksheet_name = f"{analysis_type}_{datetime.now().strftime('%Y%m')}"
-        
-        try:
-            # Try to get existing worksheet
-            worksheet = sheet.worksheet(worksheet_name)
-            # Clear existing content
-            worksheet.clear()
-        except:
-            # If doesn't exist, create new
-            worksheet = sheet.add_worksheet(title=worksheet_name, rows=1000, cols=30)
-        
-        # Convert to list format
-        headers = data_df.columns.tolist()
-        records = data_df.values.tolist()
-        
-        # Write headers
-        worksheet.append_row(headers)
-        
-        # Write data (batch write)
-        batch_size = 100
-        for i in range(0, len(records), batch_size):
-            batch = records[i:i+batch_size]
-            worksheet.append_rows(batch, value_input_option='USER_ENTERED')
-        
-        st.success(f"✅ {country} {analysis_type} data saved to history table")
-        return True
-        
-    except Exception as e:
-        st.error(f"Save failed: {str(e)}")
-        return False
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name, df in all_reports.items():
+            if not df.empty:
+                # Clean sheet name (Excel sheet names have length limit of 31 characters)
+                clean_name = sheet_name.replace('_', ' ')[:31]
+                df.to_excel(writer, sheet_name=clean_name, index=False)
+    
+    output.seek(0)
+    return output
 
 # ========== 13. Function to demonstrate ABC classification logic ==========
 def demonstrate_abc_logic():
@@ -718,8 +686,8 @@ def main():
            - Using ABC classification logic
            - Items crossing thresholds included in previous class
         
-        5. **Save history**
-           - Save to respective country history tables
+        5. **Download results**
+           - One-click download all reports as Excel
         """)
         
         st.markdown("---")
@@ -791,6 +759,9 @@ def main():
             
             st.success(f"Found {len(countries)} countries: {', '.join(countries)}")
             
+            # Dictionary to store all reports for download
+            all_reports = {}
+            
             # Create tabs for each country
             tabs = st.tabs([f"{c}" if c == 'US' else f"{c}" if c == 'CA' else f"{c}" if c == 'CN' else f"VTM 北美仓" for c in countries])
             
@@ -816,69 +787,87 @@ def main():
                     age_summary = generate_age_summary(df_with_values, country)
                     
                     if not age_summary.empty:
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.dataframe(
-                                age_summary.style.format({
-                                    'Inventory Qty': '{:,.0f}',
-                                    'Inventory Value': '${:,.2f}',
-                                    'Value %': '{:.1f}%'
-                                }),
-                                use_container_width=True
-                            )
-                        with col2:
-                            if st.button(f"💾 Save Age Summary", key=f"save_age_{country}"):
-                                save_to_gsheet(age_summary, country, 'age_summary')
+                        st.dataframe(
+                            age_summary.style.format({
+                                'Inventory Qty': '{:,.0f}',
+                                'Inventory Value': '${:,.2f}',
+                                'Value %': '{:.1f}%'
+                            }),
+                            use_container_width=True
+                        )
+                        # Store in dictionary for download
+                        report_key = f"{country}_Age_Summary"
+                        all_reports[report_key] = age_summary
                     
                     # Report 2: Brand ABC
                     st.markdown("#### Report 2: Brand ABC Classification")
                     brand_abc = generate_brand_abc(df_with_values, country)
                     
                     if not brand_abc.empty:
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            # Define column order: Brand, Inventory Qty, Inventory Value, SKU Count, Value %, Cumulative %, Brand Class
-                            column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
-                            # Only keep existing columns
-                            display_columns = [col for col in column_order if col in brand_abc.columns]
-                            
-                            st.dataframe(
-                                brand_abc[display_columns].style.format({
-                                    'Inventory Qty': '{:,.0f}',
-                                    'Inventory Value': '${:,.2f}',
-                                    'SKU Count': '{:,.0f}',
-                                    'Value %': '{:.2%}',
-                                    'Cumulative %': '{:.2%}'
-                                }),
-                                use_container_width=True
-                            )
-                        with col2:
-                            if st.button(f"💾 Save Brand ABC", key=f"save_brand_{country}"):
-                                save_to_gsheet(brand_abc, country, 'brand_abc')
+                        # Define column order for display
+                        column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+                        display_columns = [col for col in column_order if col in brand_abc.columns]
+                        
+                        st.dataframe(
+                            brand_abc[display_columns].style.format({
+                                'Inventory Qty': '{:,.0f}',
+                                'Inventory Value': '${:,.2f}',
+                                'SKU Count': '{:,.0f}',
+                                'Value %': '{:.2%}',
+                                'Cumulative %': '{:.2%}'
+                            }),
+                            use_container_width=True
+                        )
+                        # Store in dictionary for download
+                        report_key = f"{country}_Brand_ABC"
+                        all_reports[report_key] = brand_abc
                     
                     # Report 3: SKU ABC
                     st.markdown("#### Report 3: SKU ABC Classification")
                     sku_abc = generate_sku_abc(df_with_values, country)
                     
                     if not sku_abc.empty:
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
-                            available_cols = [col for col in display_cols if col in sku_abc.columns]
-                            
-                            st.dataframe(
-                                sku_abc[available_cols].head(100).style.format({
-                                    'Inventory Qty': '{:,.0f}',
-                                    'Inventory Value': '${:,.2f}',
-                                    'Value %': '{:.2%}',
-                                    'Cumulative %': '{:.2%}'
-                                }),
-                                use_container_width=True
-                            )
-                            st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
-                        with col2:
-                            if st.button(f"💾 Save SKU ABC", key=f"save_sku_{country}"):
-                                save_to_gsheet(sku_abc.head(1000), country, 'sku_abc')
+                        display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
+                        available_cols = [col for col in display_cols if col in sku_abc.columns]
+                        
+                        st.dataframe(
+                            sku_abc[available_cols].head(100).style.format({
+                                'Inventory Qty': '{:,.0f}',
+                                'Inventory Value': '${:,.2f}',
+                                'Value %': '{:.2%}',
+                                'Cumulative %': '{:.2%}'
+                            }),
+                            use_container_width=True
+                        )
+                        st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
+                        # Store in dictionary for download
+                        report_key = f"{country}_SKU_ABC"
+                        all_reports[report_key] = sku_abc
+            
+            # ===== Step 6: Download all results as Excel =====
+            if all_reports:
+                st.markdown("---")
+                st.subheader("📥 Step 6: Download All Results")
+                
+                col1, col2, col3 = st.columns(3)
+                with col2:
+                    # Generate Excel file for download
+                    excel_file = create_excel_download(all_reports)
+                    
+                    # Create download button
+                    today = datetime.now()
+                    filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
+                    
+                    st.download_button(
+                        label="📥 Download Result",
+                        data=excel_file,
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    
+                    st.success(f"✅ {len(all_reports)} reports ready for download")
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
