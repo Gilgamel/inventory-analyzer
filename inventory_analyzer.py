@@ -128,92 +128,100 @@ def get_drive_service():
         st.error(f"Failed to create Drive service: {str(e)}")
         return None
 
-# ========== 4. Get or create main folder in YOUR Google Drive ==========
-def get_or_create_main_folder(drive_service, folder_name="Inventory ABC Analyzer"):
+# ========== 4. Get shared Drive ID ==========
+def get_shared_drive_id(drive_service, drive_name="Inventory ABC Analyzer"):
     """
-    Get or create the main folder in YOUR personal Google Drive
+    Get the ID of a shared drive by name
     """
     try:
-        # Search for existing folder in your Drive
-        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        results = drive_service.files().list(
-            q=query, 
-            spaces='drive', 
-            fields='files(id, name)',
-            corpora='user'  # This ensures we search in user's Drive, not service account's
+        # List all shared drives the service account has access to
+        results = drive_service.drives().list(
+            pageSize=100,
+            fields="drives(id, name)"
         ).execute()
-        items = results.get('files', [])
         
-        if items:
-            # Folder exists in your Drive
-            folder_id = items[0]['id']
-            st.info(f"Found existing main folder in your Drive: {folder_name}")
-            return folder_id
-        else:
-            # Create new folder in your Drive
-            file_metadata = {
-                'name': folder_name,
-                'mimeType': 'application/vnd.google-apps.folder'
-            }
-            folder = drive_service.files().create(body=file_metadata, fields='id').execute()
-            folder_id = folder.get('id')
-            st.success(f"Created new main folder in your Drive: {folder_name}")
-            return folder_id
-            
+        drives = results.get('drives', [])
+        
+        for drive in drives:
+            if drive['name'] == drive_name:
+                st.success(f"Found shared drive: {drive_name}")
+                return drive['id']
+        
+        st.error(f"Shared drive '{drive_name}' not found. Please create it and share with the service account.")
+        return None
+        
     except Exception as e:
-        st.error(f"Error creating main folder: {str(e)}")
+        st.error(f"Error finding shared drive: {str(e)}")
         return None
 
-# ========== 5. Get or create year subfolder in main folder ==========
-def get_or_create_year_folder(drive_service, main_folder_id, year):
+# ========== 5. Get or create year folder in shared drive ==========
+def get_or_create_year_folder_in_shared_drive(drive_service, shared_drive_id, year):
     """
-    Get or create a year subfolder in the main folder (in your Drive)
+    Get or create a year folder in the shared drive
     """
     try:
-        # Search for existing year folder in main folder
-        query = f"name='{year}' and mimeType='application/vnd.google-apps.folder' and '{main_folder_id}' in parents and trashed=false"
+        # Search for existing year folder in shared drive
+        query = f"name='{year}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
         results = drive_service.files().list(
-            q=query, 
-            spaces='drive', 
+            q=query,
+            spaces='drive',
+            drives=[shared_drive_id],
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
             fields='files(id, name)'
         ).execute()
+        
         items = results.get('files', [])
         
         if items:
             # Folder exists
             folder_id = items[0]['id']
+            st.info(f"Found existing year folder: {year}")
             return folder_id
         else:
-            # Create new year folder in main folder
+            # Create new year folder in shared drive
             file_metadata = {
                 'name': str(year),
                 'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [main_folder_id]
+                'parents': [shared_drive_id]
             }
-            folder = drive_service.files().create(body=file_metadata, fields='id').execute()
+            
+            folder = drive_service.files().create(
+                body=file_metadata,
+                supportsAllDrives=True,
+                fields='id'
+            ).execute()
+            
             folder_id = folder.get('id')
+            st.success(f"Created new year folder: {year}")
             return folder_id
             
     except Exception as e:
         st.error(f"Error creating year folder: {str(e)}")
         return None
 
-# ========== 6. Create Google Sheet in year folder ==========
-def create_sheet_in_folder(drive_service, gsheet_client, folder_id, sheet_name):
+# ========== 6. Create Google Sheet in shared drive folder ==========
+def create_sheet_in_shared_drive(drive_service, gsheet_client, folder_id, sheet_name):
     """
-    Create a new Google Sheet in the specified folder (in your Drive)
+    Create a new Google Sheet in the specified folder within shared drive
     """
     try:
         # Create the spreadsheet
         spreadsheet = gsheet_client.create(sheet_name)
         file_id = spreadsheet.id
         
-        # Move to folder
+        # Move to folder in shared drive
         file_metadata = {
             'id': file_id,
             'parents': [folder_id]
         }
-        drive_service.files().update(fileId=file_id, addParents=folder_id, fields='id, parents').execute()
+        
+        drive_service.files().update(
+            fileId=file_id,
+            addParents=folder_id,
+            supportsAllDrives=True,
+            fields='id, parents'
+        ).execute()
         
         return spreadsheet
     except Exception as e:
@@ -225,7 +233,6 @@ def create_sheet_in_folder(drive_service, gsheet_client, folder_id, sheet_name):
 def load_warehouse_region_mapping():
     """
     Load static warehouse region mapping table from Google Sheets
-    Table structure: Warehouse, Country, Warehouse Location, Type, Description
     """
     try:
         client = connect_to_gsheet()
@@ -266,15 +273,12 @@ def load_warehouse_region_mapping():
         
         if missing_cols:
             st.error(f"Missing required columns in mapping table: {missing_cols}")
-            st.write("Available columns:", list(mapping_df.columns))
             return None
         
         with st.expander("View Warehouse Mapping Table"):
             st.dataframe(mapping_df.head())
             st.write(f"Total records: {len(mapping_df)}")
             st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
-            if 'Warehouse_Location' in mapping_df.columns:
-                st.write(f"Warehouse Location distribution: {mapping_df['Warehouse_Location'].value_counts().to_dict()}")
         
         return mapping_df
         
@@ -286,10 +290,9 @@ def load_warehouse_region_mapping():
 def join_with_warehouse_region(inventory_df, mapping_df):
     """
     JOIN inventory data with warehouse region table
-    Match based on Warehouse column
     """
     if mapping_df is None or len(mapping_df) == 0:
-        st.error("Warehouse mapping table is empty, cannot perform JOIN")
+        st.error("Warehouse mapping table is empty")
         return inventory_df
     
     warehouse_col_inventory = None
@@ -309,13 +312,6 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     if 'Warehouse' not in mapping_df.columns:
         st.error("Mapping table missing Warehouse column")
         return inventory_df
-    
-    st.info(f"""
-    **JOIN Information:**
-    - Left table (inventory): {warehouse_col_inventory}
-    - Right table (mapping): Warehouse
-    - JOIN type: LEFT JOIN
-    """)
     
     inventory_join = inventory_df.copy()
     mapping_join = mapping_df.copy()
@@ -344,21 +340,11 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     matched_rows = merged_df['Country'].notna().sum()
     match_rate = (matched_rows / total_rows * 100) if total_rows > 0 else 0
     
-    unmatched_warehouses = merged_df[merged_df['Country'].isna()][warehouse_col_inventory].unique()
-    
     st.success(f"""
     ✅ JOIN completed!
     - Total records: {total_rows}
     - Successfully matched: {matched_rows} ({match_rate:.1f}%)
-    - Unmatched: {total_rows - matched_rows}
     """)
-    
-    if len(unmatched_warehouses) > 0:
-        st.warning(f"""
-        ⚠️ Following warehouses not found in mapping table:
-        {', '.join([str(w) for w in unmatched_warehouses[:10]])}
-        {', etc' if len(unmatched_warehouses) > 10 else ''}
-        """)
     
     if 'Country' in merged_df.columns:
         country_counts = merged_df['Country'].value_counts()
@@ -424,8 +410,6 @@ def calculate_age_band_values(df):
 def abc_classification(df, value_col, group_col=None):
     """
     ABC classification function - Modified version
-    When cumulative percentage crosses 0.8 or 0.95 threshold, 
-    the crossing item is included in the previous class
     """
     if df.empty or value_col not in df.columns:
         return df
@@ -615,7 +599,6 @@ def generate_brand_abc(df, country):
 def generate_sku_abc(df, country):
     """
     Generate SKU ABC classification report
-    Sort by Brand Class from A to Z, then by Inventory Value from high to low within each Brand Class
     """
     if 'Country' not in df.columns:
         return pd.DataFrame()
@@ -669,12 +652,10 @@ def generate_sku_abc(df, country):
     
     return sku_abc
 
-# ========== 15. Save all reports to YOUR Google Drive ==========
-def save_all_to_cloud(all_reports, sheet_name):
+# ========== 15. Save all reports to shared drive ==========
+def save_all_to_shared_drive(all_reports, sheet_name):
     """
-    Save all reports to a single Google Sheet with multiple worksheets
-    Organized in: Main Folder "Inventory ABC Analyzer" → Year Subfolder → Spreadsheet
-    All files are stored in YOUR personal Google Drive, not the service account's Drive
+    Save all reports to a single Google Sheet in the shared drive
     """
     try:
         gsheet_client = connect_to_gsheet()
@@ -685,25 +666,25 @@ def save_all_to_cloud(all_reports, sheet_name):
         if drive_service is None:
             return False
         
-        # Get or create main folder "Inventory ABC Analyzer" in YOUR Drive
-        main_folder_id = get_or_create_main_folder(drive_service, "Inventory ABC Analyzer")
-        if main_folder_id is None:
-            st.error("Failed to create or access main folder in your Drive")
+        # Get the shared drive ID
+        shared_drive_id = get_shared_drive_id(drive_service, "Inventory ABC Analyzer")
+        if shared_drive_id is None:
+            st.error("Cannot access shared drive. Please ensure:")
+            st.error("1. The shared drive 'Inventory ABC Analyzer' exists")
+            st.error("2. The service account has been added as a member")
             return False
         
         # Get current year
         current_year = str(datetime.now().year)
         
-        # Get or create year subfolder in main folder
-        year_folder_id = get_or_create_year_folder(drive_service, main_folder_id, current_year)
+        # Get or create year folder in shared drive
+        year_folder_id = get_or_create_year_folder_in_shared_drive(drive_service, shared_drive_id, current_year)
         if year_folder_id is None:
-            st.error(f"Failed to create or access year folder: {current_year}")
             return False
         
         # Create new spreadsheet in the year folder
-        spreadsheet = create_sheet_in_folder(drive_service, gsheet_client, year_folder_id, sheet_name)
+        spreadsheet = create_sheet_in_shared_drive(drive_service, gsheet_client, year_folder_id, sheet_name)
         if spreadsheet is None:
-            st.error("Failed to create spreadsheet")
             return False
         
         # Add each report as a worksheet
@@ -711,22 +692,17 @@ def save_all_to_cloud(all_reports, sheet_name):
         for report_name, report_df in all_reports.items():
             if not report_df.empty:
                 try:
-                    # Clean worksheet name (remove special characters, limit length)
                     clean_name = report_name.replace('_', ' ')[:50]
                     
-                    # Create worksheet
                     worksheet = spreadsheet.add_worksheet(title=clean_name, rows=len(report_df)+1, cols=len(report_df.columns))
                     
-                    # Add timestamp columns
                     report_df = report_df.copy()
                     report_df['Analysis Date'] = datetime.now().strftime('%Y-%m-%d')
                     report_df['Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     
-                    # Prepare data for upload
                     headers = report_df.columns.tolist()
                     records = report_df.values.tolist()
                     
-                    # Upload data
                     worksheet.append_row(headers)
                     
                     batch_size = 100
@@ -740,42 +716,32 @@ def save_all_to_cloud(all_reports, sheet_name):
                 except Exception as e:
                     st.warning(f"Failed to add worksheet {report_name}: {str(e)}")
         
-        # Remove default "Sheet1" if it exists and is empty
+        # Remove default "Sheet1"
         try:
             default_sheet = spreadsheet.worksheet("Sheet1")
-            if len(default_sheet.get_all_values()) <= 1:  # Only header or empty
+            if len(default_sheet.get_all_values()) <= 1:
                 spreadsheet.del_worksheet(default_sheet)
         except:
             pass
         
-        # Get the folder link for user reference
+        # Get the shared drive folder link
         folder_link = f"https://drive.google.com/drive/folders/{year_folder_id}"
         
         st.success(f"""
-        ✅ All reports saved successfully to YOUR Google Drive!
-        - Main Folder: Inventory ABC Analyzer
+        ✅ All reports saved successfully to Shared Drive!
+        - Shared Drive: Inventory ABC Analyzer
         - Year Folder: {current_year}
         - Spreadsheet: {sheet_name}
         - Total worksheets: {worksheet_count}
         """)
         
-        # Provide links
         st.markdown(f"📁 [Open Year Folder in Google Drive]({folder_link})")
         st.markdown(f"📊 [Open Spreadsheet in Google Sheets](https://docs.google.com/spreadsheets/d/{spreadsheet.id})")
         
         return True
         
     except Exception as e:
-        if "storage quota has been exceeded" in str(e):
-            st.error("⚠️ **Storage quota exceeded!** But don't worry - this is your personal Drive quota.")
-            st.info("""
-            **Solutions:**
-            1. Free up space in your Google Drive
-            2. Delete old analysis files
-            3. Upgrade your Google Drive storage
-            """)
-        else:
-            st.error(f"Failed to save to cloud: {str(e)}")
+        st.error(f"Failed to save to shared drive: {str(e)}")
         return False
 
 # ========== 16. Function to demonstrate ABC classification logic ==========
@@ -795,7 +761,7 @@ def demonstrate_abc_logic():
     
     result = abc_classification(example_data, 'Value')
     
-    st.write("Classification result (note that Item3 crossing 80% threshold is classified as A):")
+    st.write("Classification result:")
     st.dataframe(result.style.format({
         'value_pct': '{:.2%}',
         'cum_pct': '{:.2%}'
@@ -803,12 +769,8 @@ def demonstrate_abc_logic():
     
     st.info("""
     **Logic explanation:**
-    - Item1 (40%): cumulative 40% → A class
-    - Item2 (30%): cumulative 70% → A class
-    - Item3 (20%): cumulative 90% → **A class** (crosses from 70% to 90%, exceeding 80% threshold)
-    - Item4 (5%): cumulative 95% → B class
-    - Item5 (3%): cumulative 98% → C class
-    - Item6 (2%): cumulative 100% → C class
+    - Items crossing 80% threshold are included in A class
+    - Items crossing 95% threshold are included in B class
     """)
 
 # ========== 17. Main program ==========
@@ -818,28 +780,11 @@ def main():
     with st.sidebar:
         st.markdown("""
         ### 📋 Data Flow
-        1. **Load static mapping table** (Google Sheets)
-           - Warehouse
-           - Country (used for country classification)
-           - Warehouse Location
-           - Type
-           - Description
-        
+        1. **Load static mapping table** from Google Sheets
         2. **Upload inventory data**
-           - Make sure it contains "Warehouse" column
-        
-        3. **JOIN operation**
-           - Inventory.Warehouse = Mapping.Warehouse
-           - Add Country, Warehouse Location, Type, Description
-        
-        4. **Analysis by country**
-           - Using ABC classification logic
-           - Items crossing thresholds included in previous class
-        
-        5. **Save all results**
-           - One-click save to YOUR Google Drive
-           - Organized in "Inventory ABC Analyzer" → Year folder
-           - Single spreadsheet with multiple worksheets
+        3. **JOIN with warehouse mapping**
+        4. **Generate analysis reports**
+        5. **Save to Shared Drive**
         """)
         
         st.markdown("---")
@@ -857,155 +802,84 @@ def main():
     st.subheader("📤 Upload Inventory Data File")
     inventory_file = st.file_uploader(
         "Please upload inventory report in Excel format",
-        type=['xlsx', 'xls'],
-        help="Upload inventory report containing SKU, Brand, Warehouse, Age information"
+        type=['xlsx', 'xls']
     )
     
     if inventory_file:
         try:
-            # Read inventory data
             df = pd.read_excel(inventory_file)
             
             with st.expander("View Raw Data Preview"):
                 st.dataframe(df.head())
                 st.write(f"Total rows: {len(df)}")
-                st.write(f"Column names: {list(df.columns)}")
             
-            # ===== Step 1: Load static warehouse mapping table =====
             st.subheader("🗺️ Step 1: Load Warehouse Region Mapping Table")
             mapping_df = load_warehouse_region_mapping()
             
             if mapping_df is None:
-                st.error("Unable to load warehouse mapping table, please check Google Sheets configuration")
                 st.stop()
             
-            # ===== Step 2: JOIN operation =====
             st.subheader("🔗 Step 2: JOIN Inventory Data with Warehouse Mapping")
             df_with_region = join_with_warehouse_region(df, mapping_df)
             
-            # ===== Step 3: Data preprocessing =====
             st.subheader("🔄 Step 3: Data Preprocessing")
             df_processed = preprocess_data(df_with_region)
             
-            # ===== Step 4: Calculate age band values =====
             st.subheader("💰 Step 4: Calculate Inventory Value")
             df_with_values = calculate_age_band_values(df_processed)
             
-            # ===== Step 5: Analysis by country =====
             st.subheader("📊 Step 5: Generate Analysis Reports")
             
             if 'Country' not in df_with_values.columns:
-                st.error("Unable to get country information, JOIN may have failed")
+                st.error("No country information found")
                 st.stop()
             
             countries = df_with_values['Country'].unique()
             countries = [c for c in countries if pd.notna(c)]
             
-            if len(countries) == 0:
-                st.error("No valid country data")
-                st.stop()
-            
             st.success(f"Found {len(countries)} countries: {', '.join(countries)}")
             
-            # Dictionary to store all reports
             all_reports = {}
-            
-            # Create tabs for each country
-            tabs = st.tabs([f"{c}" if c == 'US' else f"{c}" if c == 'CA' else f"{c}" if c == 'CN' else f"VTM 北美仓" for c in countries])
+            tabs = st.tabs([f"{c}" for c in countries])
             
             for tab, country in zip(tabs, countries):
                 with tab:
                     country_data = df_with_values[df_with_values['Country'] == country]
-                    
                     st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records)")
-                    
-                    # Display warehouse type and location distribution if available
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if 'Type' in country_data.columns:
-                            type_counts = country_data['Type'].value_counts()
-                            st.info(f"Warehouse type distribution: {dict(type_counts)}")
-                    with col2:
-                        if 'Warehouse_Location' in country_data.columns:
-                            location_counts = country_data['Warehouse_Location'].value_counts()
-                            st.info(f"Warehouse location distribution: {dict(location_counts)}")
                     
                     # Report 1: Age Summary
                     st.markdown("#### Report 1: Age Summary")
                     age_summary = generate_age_summary(df_with_values, country)
-                    
                     if not age_summary.empty:
-                        st.dataframe(
-                            age_summary.style.format({
-                                'Inventory Qty': '{:,.0f}',
-                                'Inventory Value': '${:,.2f}',
-                                'Value %': '{:.1f}%'
-                            }),
-                            use_container_width=True
-                        )
-                        # Store in dictionary with unique key
-                        report_key = f"{country}_Age_Summary"
-                        all_reports[report_key] = age_summary
+                        st.dataframe(age_summary, use_container_width=True)
+                        all_reports[f"{country}_Age_Summary"] = age_summary
                     
                     # Report 2: Brand ABC
-                    st.markdown("#### Report 2: Brand ABC Classification")
+                    st.markdown("#### Report 2: Brand ABC")
                     brand_abc = generate_brand_abc(df_with_values, country)
-                    
                     if not brand_abc.empty:
-                        st.dataframe(
-                            brand_abc.style.format({
-                                'Inventory Qty': '{:,.0f}',
-                                'Inventory Value': '${:,.2f}',
-                                'SKU Count': '{:,.0f}',
-                                'Value %': '{:.2%}',
-                                'Cumulative %': '{:.2%}'
-                            }),
-                            use_container_width=True
-                        )
-                        # Store in dictionary with unique key
-                        report_key = f"{country}_Brand_ABC"
-                        all_reports[report_key] = brand_abc
+                        st.dataframe(brand_abc, use_container_width=True)
+                        all_reports[f"{country}_Brand_ABC"] = brand_abc
                     
                     # Report 3: SKU ABC
-                    st.markdown("#### Report 3: SKU ABC Classification")
+                    st.markdown("#### Report 3: SKU ABC")
                     sku_abc = generate_sku_abc(df_with_values, country)
-                    
                     if not sku_abc.empty:
-                        display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
-                        available_cols = [col for col in display_cols if col in sku_abc.columns]
-                        
-                        st.dataframe(
-                            sku_abc[available_cols].head(100).style.format({
-                                'Inventory Qty': '{:,.0f}',
-                                'Inventory Value': '${:,.2f}',
-                                'Value %': '{:.2%}',
-                                'Cumulative %': '{:.2%}'
-                            }),
-                            use_container_width=True
-                        )
-                        st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
-                        # Store in dictionary with unique key
-                        report_key = f"{country}_SKU_ABC"
-                        all_reports[report_key] = sku_abc
+                        st.dataframe(sku_abc.head(100), use_container_width=True)
+                        all_reports[f"{country}_SKU_ABC"] = sku_abc
             
-            # ===== Step 6: Save all results to cloud =====
             if all_reports:
                 st.markdown("---")
-                st.subheader("☁️ Step 6: Save All Results to Your Google Drive")
+                st.subheader("☁️ Step 6: Save All Results to Shared Drive")
                 
-                col1, col2, col3 = st.columns(3)
-                with col2:
-                    if st.button("💾 Save All Result to Cloud", type="primary", use_container_width=True):
-                        with st.spinner("Saving all reports to your Google Drive..."):
-                            # Prepare sheet name with current date
-                            today = datetime.now()
-                            sheet_name = f"{today.strftime('%Y-%m-%d')} Inventory Analysis"
-                            
-                            # Save all reports
-                            save_all_to_cloud(all_reports, sheet_name)
+                if st.button("💾 Save All Result to Shared Drive", type="primary", use_container_width=True):
+                    with st.spinner("Saving all reports to shared drive..."):
+                        today = datetime.now()
+                        sheet_name = f"{today.strftime('%Y-%m-%d')} Inventory Analysis"
+                        save_all_to_shared_drive(all_reports, sheet_name)
             
         except Exception as e:
-            st.error(f"Error processing data: {str(e)}")
+            st.error(f"Error: {str(e)}")
             st.exception(e)
 
 if __name__ == "__main__":
