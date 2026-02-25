@@ -515,7 +515,7 @@ def generate_brand_abc(df, country):
         'Total_Inventory': 'sum'
     }).rename(columns={
         'SKU': 'SKU Count',
-        'Total_Inventory': 'Inventory Qty'  # 修改：将 'Total Qty' 改为 'Inventory Qty'
+        'Total_Inventory': 'Inventory Qty'
     }).reset_index()
     
     brand_summary = brand_summary[brand_summary['Total_Value'] > 0]
@@ -540,6 +540,7 @@ def generate_brand_abc(df, country):
 def generate_sku_abc(df, country):
     """
     Generate SKU ABC classification report
+    Sort by Brand Class from A to Z
     """
     if 'Country' not in df.columns:
         return pd.DataFrame()
@@ -583,6 +584,12 @@ def generate_sku_abc(df, country):
         'cum_pct': 'Cumulative %',
         'abc_class': 'SKU Class'
     })
+    
+    # Sort by Brand Class from A to Z (A first, then B, then C)
+    # Define custom sort order for Brand Class
+    brand_class_order = {'A': 0, 'B': 1, 'C': 2, 'Unclassified': 3}
+    sku_abc['sort_key'] = sku_abc['Brand Class'].map(brand_class_order)
+    sku_abc = sku_abc.sort_values('sort_key').drop('sort_key', axis=1)
     
     return sku_abc
 
@@ -824,9 +831,9 @@ def main():
                     if not brand_abc.empty:
                         col1, col2 = st.columns([3, 1])
                         with col1:
-                            # 定义列顺序：Brand, Inventory Qty, Inventory Value, SKU Count, Value %, Cumulative %, Brand Class
-                            column_order = ['Brand', 'SKU Count', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'Brand Class']
-                            # 只保留存在的列
+                            # Define column order: Brand, Inventory Qty, Inventory Value, SKU Count, Value %, Cumulative %, Brand Class
+                            column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+                            # Only keep existing columns
                             display_columns = [col for col in column_order if col in brand_abc.columns]
                             
                             st.dataframe(
@@ -854,7 +861,7 @@ def main():
                             available_cols = [col for col in display_cols if col in sku_abc.columns]
                             
                             st.dataframe(
-                                sku_abc[available_cols].head(1000).style.format({
+                                sku_abc[available_cols].head(100).style.format({
                                     'Inventory Qty': '{:,.0f}',
                                     'Inventory Value': '${:,.2f}',
                                     'Value %': '{:.2%}',
@@ -862,7 +869,7 @@ def main():
                                 }),
                                 use_container_width=True
                             )
-                            st.caption(f"Showing first 1000 rows, total {len(sku_abc)} rows")
+                            st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
                         with col2:
                             if st.button(f"💾 Save SKU ABC", key=f"save_sku_{country}"):
                                 save_to_gsheet(sku_abc.head(1000), country, 'sku_abc')
