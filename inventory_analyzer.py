@@ -162,10 +162,13 @@ def get_or_create_year_folder_in_shared_drive(drive_service, shared_drive_id, ye
     try:
         # Search for existing year folder in shared drive
         query = f"name='{year}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        
+        # Use driveId to search within the shared drive
         results = drive_service.files().list(
             q=query,
             spaces='drive',
-            drives=[shared_drive_id],
+            driveId=shared_drive_id,
+            corpora='drive',
             includeItemsFromAllDrives=True,
             supportsAllDrives=True,
             fields='files(id, name)'
