@@ -904,7 +904,7 @@ def main():
                     filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
                     
                     st.download_button(
-                        label="📥 Download Result",
+                        label="📥 Download Results",
                         data=excel_file,
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
