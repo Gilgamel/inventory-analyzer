@@ -1,45 +1,140 @@
-# 📊 Inventory ABC Classification Analyzer
+# Inventory ABC Classification Analyzer
 
-A Streamlit application designed specifically for **Lingxing ERP (领星ERP) inventory data**.  
+A Streamlit application designed specifically for Lingxing ERP (领星ERP) inventory data.
 
-It performs automated **ABC classification**, **inventory aging analysis**, and **multi-country reporting**, with warehouse-country mapping via Google Sheets and one-click Excel export.
+This tool performs automated ABC classification, inventory aging analysis, and multi-country reporting. It integrates with a Google Sheets warehouse mapping table and supports one-click Excel export.
 
 ---
 
-## 🎯 Purpose
+## Purpose
 
-This tool is built for inventory reports exported from **Lingxing ERP**, especially those containing:
+This project is built for inventory reports exported from Lingxing ERP, especially those containing:
 
 - SKU
-- Brand
+- Brand (品牌)
 - Warehouse (仓库)
 - Total inventory
-- Aging quantity & cost fields (e.g., 0~30库龄成本)
+- Aging quantity and cost fields (e.g., 0~30库龄成本)
 
 Chinese column names are automatically mapped to standardized English field names.
 
 ---
 
-## 🔄 Processing Logic
+## Processing Logic
 
-The system follows this workflow:
+### 1. Load Warehouse Mapping (Google Sheets)
 
-### 1️⃣ Load Warehouse Mapping (Google Sheets)
-- Static mapping table
-- Required fields:
-  - `Warehouse`
-  - `Country`
-- Optional:
-  - Warehouse Location
-  - Type
-  - Description
+A static warehouse-region mapping table is loaded from Google Sheets.
 
----
+Required fields:
+- Warehouse
+- Country
 
-### 2️⃣ Upload Lingxing ERP Inventory File
-- Excel format (`.xlsx` / `.xls`)
-- Must contain warehouse field (`仓库` or `Warehouse`)
+Optional fields:
+- Warehouse Location
+- Type
+- Description
 
 ---
 
-### 3️⃣ LEFT JOIN
+### 2. Upload Lingxing ERP Inventory File
+
+- Excel format (.xlsx / .xls)
+- Must contain Warehouse (仓库 or Warehouse)
+
+---
+
+### 3. LEFT JOIN
+
+Inventory.Warehouse = Mapping.Warehouse
+
+This adds:
+- Country
+- Warehouse Location
+- Type
+- Description
+
+Warehouse names are normalized (trimmed and converted to uppercase) before matching.
+
+---
+
+### 4. Data Preprocessing
+
+- Rename Chinese columns to English
+- Convert numeric columns
+- Calculate inventory value by age bands:
+
+Age bands:
+- 0–60 days
+- 61–90 days
+- 91–180 days
+- 181–365 days
+- 365+ days
+
+Each band calculates:
+- Total quantity
+- Total inventory value
+
+---
+
+### 5. Modified ABC Classification
+
+Classification is based on cumulative inventory value.
+
+Rules:
+- A Class: cumulative ≤ 80%
+- B Class: cumulative ≤ 95%
+- C Class: remaining items
+
+Special logic:
+If an item crosses the 80% or 95% threshold, it is included in the previous class.
+
+ABC classification is calculated:
+- At Brand level
+- At SKU level (within each Brand)
+
+---
+
+### 6. Output Reports (Per Country)
+
+For each country:
+
+1. Age Summary
+2. Brand ABC Classification
+3. SKU ABC Classification
+
+All reports are exported into a single Excel file:
+- Multiple sheets
+- Percentage formatting
+- Auto-adjusted column widths
+
+---
+
+## Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/your-username/inventory-abc-analyzer.git
+cd inventory-abc-analyzer
+```
+
+
+### 2. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Share Google Sheet Permission
+
+1. Enable the Google Sheets API in Google Cloud Console  
+2. Create a Service Account  
+3. Share the Warehouse Region Google Sheet with the Service Account email  
+
+
+### 4. Create App on Streamlit Cloud
+
+1. Login streamlit cloud
+2. Click "create app"
+3. Select the corresponding repository on GitHub
+
