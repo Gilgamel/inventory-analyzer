@@ -4,7 +4,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
-from googleapiclient.discovery import build
 
 # Page configuration
 st.set_page_config(
@@ -69,9 +68,9 @@ AGE_BANDS = [
 
 # ========== 3. Google Sheets connection function ==========
 @st.cache_resource
-def get_credentials():
+def connect_to_gsheet():
     """
-    Get Google credentials from secrets
+    Connect to Google Sheets
     """
     try:
         credentials_dict = {
@@ -90,170 +89,51 @@ def get_credentials():
                  'https://www.googleapis.com/auth/spreadsheets']
         credentials = Credentials.from_service_account_info(
             credentials_dict, scopes=scope)
-        
-        return credentials
-    except Exception as e:
-        st.error(f"Failed to get credentials: {str(e)}")
-        return None
-
-@st.cache_resource
-def connect_to_gsheet():
-    """
-    Connect to Google Sheets using credentials
-    """
-    try:
-        credentials = get_credentials()
-        if credentials is None:
-            return None
-        
         client = gspread.authorize(credentials)
+        
         return client
     except Exception as e:
         st.error(f"Failed to connect to Google Sheets: {str(e)}")
         return None
 
-@st.cache_resource
-def get_drive_service():
-    """
-    Get Google Drive service
-    """
-    try:
-        credentials = get_credentials()
-        if credentials is None:
-            return None
-        
-        drive_service = build('drive', 'v3', credentials=credentials)
-        return drive_service
-    except Exception as e:
-        st.error(f"Failed to create Drive service: {str(e)}")
-        return None
-
-# ========== 4. Get shared Drive ID ==========
-def get_shared_drive_id(drive_service, drive_name="Inventory ABC Analyzer"):
-    """
-    Get the ID of a shared drive by name
-    """
-    try:
-        # List all shared drives the service account has access to
-        results = drive_service.drives().list(
-            pageSize=100,
-            fields="drives(id, name)"
-        ).execute()
-        
-        drives = results.get('drives', [])
-        
-        for drive in drives:
-            if drive['name'] == drive_name:
-                st.success(f"Found shared drive: {drive_name}")
-                return drive['id']
-        
-        st.error(f"Shared drive '{drive_name}' not found. Please create it and share with the service account.")
-        return None
-        
-    except Exception as e:
-        st.error(f"Error finding shared drive: {str(e)}")
-        return None
-
-# ========== 5. Get or create year folder in shared drive ==========
-def get_or_create_year_folder_in_shared_drive(drive_service, shared_drive_id, year):
-    """
-    Get or create a year folder in the shared drive
-    """
-    try:
-        # Search for existing year folder in shared drive
-        query = f"name='{year}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        
-        # Use driveId to search within the shared drive
-        results = drive_service.files().list(
-            q=query,
-            spaces='drive',
-            driveId=shared_drive_id,
-            corpora='drive',
-            includeItemsFromAllDrives=True,
-            supportsAllDrives=True,
-            fields='files(id, name)'
-        ).execute()
-        
-        items = results.get('files', [])
-        
-        if items:
-            # Folder exists
-            folder_id = items[0]['id']
-            st.info(f"Found existing year folder: {year}")
-            return folder_id
-        else:
-            # Create new year folder in shared drive
-            file_metadata = {
-                'name': str(year),
-                'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [shared_drive_id]
-            }
-            
-            folder = drive_service.files().create(
-                body=file_metadata,
-                supportsAllDrives=True,
-                fields='id'
-            ).execute()
-            
-            folder_id = folder.get('id')
-            st.success(f"Created new year folder: {year}")
-            return folder_id
-            
-    except Exception as e:
-        st.error(f"Error creating year folder: {str(e)}")
-        return None
-
-# ========== 6. Create Google Sheet in shared drive folder ==========
-def create_sheet_in_shared_drive(drive_service, gsheet_client, folder_id, sheet_name):
-    """
-    Create a new Google Sheet in the specified folder within shared drive
-    """
-    try:
-        # Create the spreadsheet
-        spreadsheet = gsheet_client.create(sheet_name)
-        file_id = spreadsheet.id
-        
-        # Move to folder in shared drive
-        file_metadata = {
-            'id': file_id,
-            'parents': [folder_id]
-        }
-        
-        drive_service.files().update(
-            fileId=file_id,
-            addParents=folder_id,
-            supportsAllDrives=True,
-            fields='id, parents'
-        ).execute()
-        
-        return spreadsheet
-    except Exception as e:
-        st.error(f"Error creating sheet: {str(e)}")
-        return None
-
-# ========== 7. Load static Warehouse Region mapping table ==========
-@st.cache_data(ttl=3600)
+# ========== 4. Load static Warehouse Region mapping table ==========
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def load_warehouse_region_mapping():
     """
     Load static warehouse region mapping table from Google Sheets
+    Table structure: Warehouse, Country, Warehouse Location, Type, Description
     """
     try:
         client = connect_to_gsheet()
         if client is None:
             return None
         
+        # Get mapping sheet ID from secrets
         mapping_sheet_id = st.secrets["sheets"]["warehouse_region_sheet_id"]
+        
+        # Open mapping sheet
         sheet = client.open_by_key(mapping_sheet_id)
+        
+        # Get first worksheet
         worksheet = sheet.sheet1
+        
+        # Get all records
         records = worksheet.get_all_records()
         
         if not records:
             st.warning("Warehouse mapping table is empty")
             return None
         
+        # Convert to DataFrame
         mapping_df = pd.DataFrame(records)
+        
+        # Display original column names for debugging
+        st.write("Original column names in mapping table:", list(mapping_df.columns))
+        
+        # Standardize column names (remove extra spaces)
         mapping_df.columns = [str(col).strip() for col in mapping_df.columns]
         
+        # Create column mapping based on your actual column names
         column_mapping = {}
         for col in mapping_df.columns:
             col_lower = col.lower()
@@ -268,20 +148,26 @@ def load_warehouse_region_mapping():
             elif 'description' in col_lower:
                 column_mapping[col] = 'Description'
         
+        # Rename columns
         if column_mapping:
             mapping_df = mapping_df.rename(columns=column_mapping)
         
+        # Ensure required columns exist
         required_cols = ['Warehouse', 'Country']
         missing_cols = [col for col in required_cols if col not in mapping_df.columns]
         
         if missing_cols:
             st.error(f"Missing required columns in mapping table: {missing_cols}")
+            st.write("Available columns:", list(mapping_df.columns))
             return None
         
+        # Show preview
         with st.expander("View Warehouse Mapping Table"):
             st.dataframe(mapping_df.head())
             st.write(f"Total records: {len(mapping_df)}")
             st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
+            if 'Warehouse_Location' in mapping_df.columns:
+                st.write(f"Warehouse Location distribution: {mapping_df['Warehouse_Location'].value_counts().to_dict()}")
         
         return mapping_df
         
@@ -289,20 +175,24 @@ def load_warehouse_region_mapping():
         st.error(f"Failed to load warehouse mapping table: {str(e)}")
         return None
 
-# ========== 8. JOIN inventory data with warehouse mapping table ==========
+# ========== 5. JOIN inventory data with warehouse mapping table ==========
 def join_with_warehouse_region(inventory_df, mapping_df):
     """
     JOIN inventory data with warehouse region table
+    Match based on Warehouse column
     """
     if mapping_df is None or len(mapping_df) == 0:
-        st.error("Warehouse mapping table is empty")
+        st.error("Warehouse mapping table is empty, cannot perform JOIN")
         return inventory_df
     
+    # Find warehouse column in inventory data
     warehouse_col_inventory = None
     
+    # Check if Warehouse column already exists
     if 'Warehouse' in inventory_df.columns:
         warehouse_col_inventory = 'Warehouse'
     else:
+        # Try to find column containing "仓库" or "warehouse"
         for col in inventory_df.columns:
             if '仓库' in col or 'warehouse' in col.lower():
                 warehouse_col_inventory = col
@@ -312,16 +202,27 @@ def join_with_warehouse_region(inventory_df, mapping_df):
         st.error("Cannot find warehouse column in inventory data")
         return inventory_df
     
+    # Ensure mapping table has Warehouse column
     if 'Warehouse' not in mapping_df.columns:
         st.error("Mapping table missing Warehouse column")
         return inventory_df
     
+    st.info(f"""
+    **JOIN Information:**
+    - Left table (inventory): {warehouse_col_inventory}
+    - Right table (mapping): Warehouse
+    - JOIN type: LEFT JOIN
+    """)
+    
+    # Prepare data
     inventory_join = inventory_df.copy()
     mapping_join = mapping_df.copy()
     
+    # Convert warehouse column to string and strip spaces for matching
     inventory_join['_join_key'] = inventory_join[warehouse_col_inventory].astype(str).str.strip().str.upper()
     mapping_join['_join_key'] = mapping_join['Warehouse'].astype(str).str.strip().str.upper()
     
+    # Select needed columns - include all available columns from mapping
     mapping_cols = ['_join_key', 'Country']
     if 'Warehouse_Location' in mapping_join.columns:
         mapping_cols.append('Warehouse_Location')
@@ -330,6 +231,7 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     if 'Description' in mapping_join.columns:
         mapping_cols.append('Description')
     
+    # Perform LEFT JOIN
     merged_df = pd.merge(
         inventory_join,
         mapping_join[mapping_cols],
@@ -337,39 +239,57 @@ def join_with_warehouse_region(inventory_df, mapping_df):
         how='left'
     )
     
+    # Remove temporary column
     merged_df = merged_df.drop('_join_key', axis=1)
     
+    # Calculate match statistics using Country column
     total_rows = len(merged_df)
     matched_rows = merged_df['Country'].notna().sum()
     match_rate = (matched_rows / total_rows * 100) if total_rows > 0 else 0
+    
+    # Find unmatched warehouses
+    unmatched_warehouses = merged_df[merged_df['Country'].isna()][warehouse_col_inventory].unique()
     
     st.success(f"""
     ✅ JOIN completed!
     - Total records: {total_rows}
     - Successfully matched: {matched_rows} ({match_rate:.1f}%)
+    - Unmatched: {total_rows - matched_rows}
     """)
     
+    if len(unmatched_warehouses) > 0:
+        st.warning(f"""
+        ⚠️ Following warehouses not found in mapping table:
+        {', '.join([str(w) for w in unmatched_warehouses[:10]])}
+        {', etc' if len(unmatched_warehouses) > 10 else ''}
+        """)
+    
+    # Show country distribution after JOIN
     if 'Country' in merged_df.columns:
         country_counts = merged_df['Country'].value_counts()
         st.info(f"Country distribution: {dict(country_counts)}")
     
     return merged_df
 
-# ========== 9. Data preprocessing function ==========
+# ========== 6. Data preprocessing function ==========
 def preprocess_data(df):
     """
     Data preprocessing: rename columns
     """
+    # Create copy to avoid modifying original data
     df_copy = df.copy()
     
+    # Rename columns
     for chinese_name, english_name in COLUMN_MAPPING.items():
         if chinese_name in df_copy.columns:
             df_copy = df_copy.rename(columns={chinese_name: english_name})
     
+    # Ensure numeric columns are numeric type
     numeric_cols = ['Total_Inventory', 'Available_Qty', 'Reserved_Qty', 'Defect_Qty',
                     'Pending_Inspection', 'Transfer_Transit', 'FBA_Transit', 
                     'FBA_Planned', 'Expected_Receipt', 'Projected_Inventory']
     
+    # Add all age-related columns
     for band in AGE_BANDS:
         numeric_cols.extend(band['qty_cols'])
         numeric_cols.extend(band['cost_cols'])
@@ -380,27 +300,31 @@ def preprocess_data(df):
     
     return df_copy
 
-# ========== 10. Calculate inventory value by age band ==========
+# ========== 7. Calculate inventory value by age band ==========
 def calculate_age_band_values(df):
     """
     Calculate inventory value for each SKU by age band
     """
     result = df.copy()
     
+    # Calculate total value for each age band
     for band in AGE_BANDS:
         band_name = band['name']
+        # Calculate total cost for this age band
         cost_cols = [col for col in band['cost_cols'] if col in df.columns]
         if cost_cols:
             result[f'{band_name}_Value'] = result[cost_cols].sum(axis=1)
         else:
             result[f'{band_name}_Value'] = 0
         
+        # Calculate total quantity for this age band
         qty_cols = [col for col in band['qty_cols'] if col in df.columns]
         if qty_cols:
             result[f'{band_name}_Qty'] = result[qty_cols].sum(axis=1)
         else:
             result[f'{band_name}_Qty'] = 0
     
+    # Calculate total inventory value
     value_cols = [f"{band['name']}_Value" for band in AGE_BANDS if f"{band['name']}_Value" in result.columns]
     if value_cols:
         result['Total_Value'] = result[value_cols].sum(axis=1)
@@ -409,10 +333,12 @@ def calculate_age_band_values(df):
     
     return result
 
-# ========== 11. Modified ABC classification function ==========
+# ========== 8. Modified ABC classification function ==========
 def abc_classification(df, value_col, group_col=None):
     """
     ABC classification function - Modified version
+    When cumulative percentage crosses 0.8 or 0.95 threshold, 
+    the crossing item is included in the previous class
     """
     if df.empty or value_col not in df.columns:
         return df
@@ -421,12 +347,15 @@ def abc_classification(df, value_col, group_col=None):
         result_dfs = []
         for group, group_df in df.groupby(group_col):
             if len(group_df) > 0:
+                # Sort by value descending
                 sorted_df = group_df.sort_values(value_col, ascending=False).copy()
                 total = sorted_df[value_col].sum()
                 
                 if total > 0:
+                    # Calculate value percentage
                     sorted_df['value_pct'] = sorted_df[value_col] / total
                     
+                    # Calculate cumulative percentage
                     cum_pct = 0
                     cum_pct_list = []
                     
@@ -435,8 +364,11 @@ def abc_classification(df, value_col, group_col=None):
                         cum_pct_list.append(cum_pct)
                     
                     sorted_df['cum_pct'] = cum_pct_list
-                    sorted_df['abc_class'] = 'C'
                     
+                    # Initialize classification column
+                    sorted_df['abc_class'] = 'C'  # Default to C class
+                    
+                    # Identify A class: cumulative <= 0.8 OR crosses from <0.8 to >0.8
                     a_mask = pd.Series(False, index=sorted_df.index)
                     prev_cum = 0
                     
@@ -447,15 +379,18 @@ def abc_classification(df, value_col, group_col=None):
                     
                     sorted_df.loc[a_mask, 'abc_class'] = 'A'
                     
+                    # Identify B class: after A class, cumulative <= 0.95 OR crosses from <0.95 to >0.95
                     b_mask = pd.Series(False, index=sorted_df.index)
                     prev_cum = 0
                     
                     for idx, cum in zip(sorted_df.index, cum_pct_list):
                         if cum <= 0.95 or (prev_cum < 0.95 and cum > 0.95):
+                            # If not already A class
                             if not a_mask[idx]:
                                 b_mask[idx] = True
                         prev_cum = cum
                     
+                    # B class should not overlap with A class
                     b_mask = b_mask & ~a_mask
                     sorted_df.loc[b_mask, 'abc_class'] = 'B'
                     
@@ -469,12 +404,15 @@ def abc_classification(df, value_col, group_col=None):
         return pd.concat(result_dfs, ignore_index=True) if result_dfs else df
     
     else:
+        # Overall classification (no grouping)
         sorted_df = df.sort_values(value_col, ascending=False).copy()
         total = sorted_df[value_col].sum()
         
         if total > 0:
+            # Calculate value percentage
             sorted_df['value_pct'] = sorted_df[value_col] / total
             
+            # Calculate cumulative percentage
             cum_pct = 0
             cum_pct_list = []
             
@@ -483,8 +421,11 @@ def abc_classification(df, value_col, group_col=None):
                 cum_pct_list.append(cum_pct)
             
             sorted_df['cum_pct'] = cum_pct_list
-            sorted_df['abc_class'] = 'C'
             
+            # Initialize classification column
+            sorted_df['abc_class'] = 'C'  # Default to C class
+            
+            # Identify A class: cumulative <= 0.8 OR crosses from <0.8 to >0.8
             a_mask = pd.Series(False, index=sorted_df.index)
             prev_cum = 0
             
@@ -495,15 +436,18 @@ def abc_classification(df, value_col, group_col=None):
             
             sorted_df.loc[a_mask, 'abc_class'] = 'A'
             
+            # Identify B class: after A class, cumulative <= 0.95 OR crosses from <0.95 to >0.95
             b_mask = pd.Series(False, index=sorted_df.index)
             prev_cum = 0
             
             for idx, cum in zip(sorted_df.index, cum_pct_list):
                 if cum <= 0.95 or (prev_cum < 0.95 and cum > 0.95):
+                    # If not already A class
                     if not a_mask[idx]:
                         b_mask[idx] = True
                 prev_cum = cum
             
+            # B class should not overlap with A class
             b_mask = b_mask & ~a_mask
             sorted_df.loc[b_mask, 'abc_class'] = 'B'
             
@@ -514,7 +458,7 @@ def abc_classification(df, value_col, group_col=None):
         
         return sorted_df
 
-# ========== 12. Generate Report 1: Age Summary ==========
+# ========== 9. Generate Report 1: Age Summary ==========
 def generate_age_summary(df, country):
     """
     Generate age summary report
@@ -549,12 +493,10 @@ def generate_age_summary(df, country):
     summary_df = pd.DataFrame(age_summary)
     total_value = summary_df['Inventory Value'].sum()
     summary_df['Value %'] = (summary_df['Inventory Value'] / total_value * 100).round(2)
-    summary_df['Country'] = country
-    summary_df['Report Type'] = 'Age Summary'
     
     return summary_df
 
-# ========== 13. Generate Report 2: Brand ABC Classification ==========
+# ========== 10. Generate Report 2: Brand ABC Classification ==========
 def generate_brand_abc(df, country):
     """
     Generate brand ABC classification report
@@ -581,6 +523,7 @@ def generate_brand_abc(df, country):
     if len(brand_summary) == 0:
         return pd.DataFrame()
     
+    # Use modified ABC classification function
     brand_abc = abc_classification(brand_summary, 'Total_Value')
     
     brand_abc = brand_abc.rename(columns={
@@ -591,17 +534,13 @@ def generate_brand_abc(df, country):
         'abc_class': 'Brand Class'
     })
     
-    column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
-    brand_abc = brand_abc[[col for col in column_order if col in brand_abc.columns]]
-    brand_abc['Country'] = country
-    brand_abc['Report Type'] = 'Brand ABC'
-    
     return brand_abc
 
-# ========== 14. Generate Report 3: SKU ABC Classification ==========
+# ========== 11. Generate Report 3: SKU ABC Classification ==========
 def generate_sku_abc(df, country):
     """
     Generate SKU ABC classification report
+    Sort by Brand Class from A to Z, then by Inventory Value from high to low within each Brand Class
     """
     if 'Country' not in df.columns:
         return pd.DataFrame()
@@ -611,6 +550,7 @@ def generate_sku_abc(df, country):
     if len(country_df) == 0:
         return pd.DataFrame()
     
+    # Prepare SKU-level data
     sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Inventory']
     available_cols = [col for col in sku_cols if col in country_df.columns]
     
@@ -623,6 +563,7 @@ def generate_sku_abc(df, country):
     if len(sku_data) == 0:
         return pd.DataFrame()
     
+    # Get brand classification
     brand_abc = generate_brand_abc(df, country)
     if len(brand_abc) > 0 and 'Brand' in brand_abc.columns:
         brand_class_map = dict(zip(brand_abc['Brand'], brand_abc['Brand Class']))
@@ -630,6 +571,7 @@ def generate_sku_abc(df, country):
     else:
         sku_data['Brand Class'] = 'Unclassified'
     
+    # Use modified ABC classification function for SKU-level classification
     sku_abc = abc_classification(sku_data, 'Total_Value', group_col='Brand')
     
     sku_abc = sku_abc.rename(columns={
@@ -643,117 +585,86 @@ def generate_sku_abc(df, country):
         'abc_class': 'SKU Class'
     })
     
+    # Define custom sort order for Brand Class
     brand_class_order = {'A': 0, 'B': 1, 'C': 2, 'Unclassified': 3}
-    sku_abc['brand_sort'] = sku_abc['Brand Class'].map(brand_class_order)
-    sku_abc = sku_abc.sort_values(['brand_sort', 'Inventory Value'], ascending=[True, False])
-    sku_abc = sku_abc.drop('brand_sort', axis=1)
     
-    display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
-    sku_abc = sku_abc[[col for col in display_cols if col in sku_abc.columns]]
-    sku_abc['Country'] = country
-    sku_abc['Report Type'] = 'SKU ABC'
+    # Create sort key for Brand Class
+    sku_abc['brand_sort'] = sku_abc['Brand Class'].map(brand_class_order)
+    
+    # Sort by Brand Class first (ascending), then by Inventory Value (descending)
+    sku_abc = sku_abc.sort_values(['brand_sort', 'Inventory Value'], ascending=[True, False])
+    
+    # Remove temporary sort column
+    sku_abc = sku_abc.drop('brand_sort', axis=1)
     
     return sku_abc
 
-# ========== 15. Save all reports to shared drive ==========
-def save_all_to_shared_drive(all_reports, sheet_name):
+# ========== 12. Save to Google Sheets ==========
+def save_to_gsheet(data_df, country, analysis_type):
     """
-    Save all reports to a single Google Sheet in the shared drive
+    Save data to corresponding country's Google Sheets history table
     """
     try:
-        gsheet_client = connect_to_gsheet()
-        if gsheet_client is None:
+        client = connect_to_gsheet()
+        if client is None:
             return False
         
-        drive_service = get_drive_service()
-        if drive_service is None:
+        # Add timestamp
+        data_df = data_df.copy()
+        data_df['Analysis Date'] = datetime.now().strftime('%Y-%m-%d')
+        data_df['Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Select history table based on country
+        sheet_id_key = f"{country}_history_sheet_id"
+        sheet_id = st.secrets["sheets"].get(sheet_id_key)
+        
+        if not sheet_id:
+            st.error(f"No history table configured for {country}")
             return False
         
-        # Get the shared drive ID
-        shared_drive_id = get_shared_drive_id(drive_service, "Inventory ABC Analyzer")
-        if shared_drive_id is None:
-            st.error("Cannot access shared drive. Please ensure:")
-            st.error("1. The shared drive 'Inventory ABC Analyzer' exists")
-            st.error("2. The service account has been added as a member")
-            return False
+        # Open sheet
+        sheet = client.open_by_key(sheet_id)
         
-        # Get current year
-        current_year = str(datetime.now().year)
+        # Create worksheet name: analysis_type_YYYYMM
+        worksheet_name = f"{analysis_type}_{datetime.now().strftime('%Y%m')}"
         
-        # Get or create year folder in shared drive
-        year_folder_id = get_or_create_year_folder_in_shared_drive(drive_service, shared_drive_id, current_year)
-        if year_folder_id is None:
-            return False
-        
-        # Create new spreadsheet in the year folder
-        spreadsheet = create_sheet_in_shared_drive(drive_service, gsheet_client, year_folder_id, sheet_name)
-        if spreadsheet is None:
-            return False
-        
-        # Add each report as a worksheet
-        worksheet_count = 0
-        for report_name, report_df in all_reports.items():
-            if not report_df.empty:
-                try:
-                    clean_name = report_name.replace('_', ' ')[:50]
-                    
-                    worksheet = spreadsheet.add_worksheet(title=clean_name, rows=len(report_df)+1, cols=len(report_df.columns))
-                    
-                    report_df = report_df.copy()
-                    report_df['Analysis Date'] = datetime.now().strftime('%Y-%m-%d')
-                    report_df['Timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    headers = report_df.columns.tolist()
-                    records = report_df.values.tolist()
-                    
-                    worksheet.append_row(headers)
-                    
-                    batch_size = 100
-                    for i in range(0, len(records), batch_size):
-                        batch = records[i:i+batch_size]
-                        worksheet.append_rows(batch, value_input_option='USER_ENTERED')
-                    
-                    worksheet_count += 1
-                    st.info(f"✅ Added worksheet: {clean_name} ({len(report_df)} rows)")
-                    
-                except Exception as e:
-                    st.warning(f"Failed to add worksheet {report_name}: {str(e)}")
-        
-        # Remove default "Sheet1"
         try:
-            default_sheet = spreadsheet.worksheet("Sheet1")
-            if len(default_sheet.get_all_values()) <= 1:
-                spreadsheet.del_worksheet(default_sheet)
+            # Try to get existing worksheet
+            worksheet = sheet.worksheet(worksheet_name)
+            # Clear existing content
+            worksheet.clear()
         except:
-            pass
+            # If doesn't exist, create new
+            worksheet = sheet.add_worksheet(title=worksheet_name, rows=1000, cols=30)
         
-        # Get the shared drive folder link
-        folder_link = f"https://drive.google.com/drive/folders/{year_folder_id}"
+        # Convert to list format
+        headers = data_df.columns.tolist()
+        records = data_df.values.tolist()
         
-        st.success(f"""
-        ✅ All reports saved successfully to Shared Drive!
-        - Shared Drive: Inventory ABC Analyzer
-        - Year Folder: {current_year}
-        - Spreadsheet: {sheet_name}
-        - Total worksheets: {worksheet_count}
-        """)
+        # Write headers
+        worksheet.append_row(headers)
         
-        st.markdown(f"📁 [Open Year Folder in Google Drive]({folder_link})")
-        st.markdown(f"📊 [Open Spreadsheet in Google Sheets](https://docs.google.com/spreadsheets/d/{spreadsheet.id})")
+        # Write data (batch write)
+        batch_size = 100
+        for i in range(0, len(records), batch_size):
+            batch = records[i:i+batch_size]
+            worksheet.append_rows(batch, value_input_option='USER_ENTERED')
         
+        st.success(f"✅ {country} {analysis_type} data saved to history table")
         return True
         
     except Exception as e:
-        st.error(f"Failed to save to shared drive: {str(e)}")
+        st.error(f"Save failed: {str(e)}")
         return False
 
-# ========== 16. Function to demonstrate ABC classification logic ==========
+# ========== 13. Function to demonstrate ABC classification logic ==========
 def demonstrate_abc_logic():
     """
     Demonstrate the modified ABC classification logic
     """
     st.subheader("📊 ABC Classification Logic Demonstration")
     
+    # Create example data
     example_data = pd.DataFrame({
         'Item': ['Item1', 'Item2', 'Item3', 'Item4', 'Item5', 'Item6'],
         'Value': [400, 300, 200, 50, 30, 20]
@@ -762,9 +673,10 @@ def demonstrate_abc_logic():
     st.write("Example data:")
     st.dataframe(example_data)
     
+    # Apply ABC classification
     result = abc_classification(example_data, 'Value')
     
-    st.write("Classification result:")
+    st.write("Classification result (note that Item3 crossing 80% threshold is classified as A):")
     st.dataframe(result.style.format({
         'value_pct': '{:.2%}',
         'cum_pct': '{:.2%}'
@@ -772,29 +684,51 @@ def demonstrate_abc_logic():
     
     st.info("""
     **Logic explanation:**
-    - Items crossing 80% threshold are included in A class
-    - Items crossing 95% threshold are included in B class
+    - Item1 (40%): cumulative 40% → A class
+    - Item2 (30%): cumulative 70% → A class
+    - Item3 (20%): cumulative 90% → **A class** (crosses from 70% to 90%, exceeding 80% threshold)
+    - Item4 (5%): cumulative 95% → B class
+    - Item5 (3%): cumulative 98% → C class
+    - Item6 (2%): cumulative 100% → C class
     """)
 
-# ========== 17. Main program ==========
+# ========== 14. Main program ==========
 def main():
     st.sidebar.header("⚙️ System Information")
     
+    # Display system architecture
     with st.sidebar:
         st.markdown("""
         ### 📋 Data Flow
-        1. **Load static mapping table** from Google Sheets
+        1. **Load static mapping table** (Google Sheets)
+           - Warehouse
+           - Country (used for country classification)
+           - Warehouse Location
+           - Type
+           - Description
+        
         2. **Upload inventory data**
-        3. **JOIN with warehouse mapping**
-        4. **Generate analysis reports**
-        5. **Save to Shared Drive**
+           - Make sure it contains "Warehouse" column
+        
+        3. **JOIN operation**
+           - Inventory.Warehouse = Mapping.Warehouse
+           - Add Country, Warehouse Location, Type, Description
+        
+        4. **Analysis by country**
+           - Using ABC classification logic
+           - Items crossing thresholds included in previous class
+        
+        5. **Save history**
+           - Save to respective country history tables
         """)
         
         st.markdown("---")
         
+        # Add ABC logic demonstration button
         if st.button("📊 View ABC Classification Demo"):
             demonstrate_abc_logic()
         
+        # Test connection button
         if st.button("🔄 Test Google Sheets Connection"):
             client = connect_to_gsheet()
             if client:
@@ -802,87 +736,152 @@ def main():
             else:
                 st.error("❌ Connection failed")
     
+    # Main content area
     st.subheader("📤 Upload Inventory Data File")
     inventory_file = st.file_uploader(
         "Please upload inventory report in Excel format",
-        type=['xlsx', 'xls']
+        type=['xlsx', 'xls'],
+        help="Upload inventory report containing SKU, Brand, Warehouse, Age information"
     )
     
     if inventory_file:
         try:
+            # Read inventory data
             df = pd.read_excel(inventory_file)
             
             with st.expander("View Raw Data Preview"):
                 st.dataframe(df.head())
                 st.write(f"Total rows: {len(df)}")
+                st.write(f"Column names: {list(df.columns)}")
             
+            # ===== Step 1: Load static warehouse mapping table =====
             st.subheader("🗺️ Step 1: Load Warehouse Region Mapping Table")
             mapping_df = load_warehouse_region_mapping()
             
             if mapping_df is None:
+                st.error("Unable to load warehouse mapping table, please check Google Sheets configuration")
                 st.stop()
             
+            # ===== Step 2: JOIN operation =====
             st.subheader("🔗 Step 2: JOIN Inventory Data with Warehouse Mapping")
             df_with_region = join_with_warehouse_region(df, mapping_df)
             
+            # ===== Step 3: Data preprocessing =====
             st.subheader("🔄 Step 3: Data Preprocessing")
             df_processed = preprocess_data(df_with_region)
             
+            # ===== Step 4: Calculate age band values =====
             st.subheader("💰 Step 4: Calculate Inventory Value")
             df_with_values = calculate_age_band_values(df_processed)
             
+            # ===== Step 5: Analysis by country =====
             st.subheader("📊 Step 5: Generate Analysis Reports")
             
+            # Get unique countries
             if 'Country' not in df_with_values.columns:
-                st.error("No country information found")
+                st.error("Unable to get country information, JOIN may have failed")
                 st.stop()
             
             countries = df_with_values['Country'].unique()
-            countries = [c for c in countries if pd.notna(c)]
+            countries = [c for c in countries if pd.notna(c)]  # Filter NaN
+            
+            if len(countries) == 0:
+                st.error("No valid country data")
+                st.stop()
             
             st.success(f"Found {len(countries)} countries: {', '.join(countries)}")
             
-            all_reports = {}
-            tabs = st.tabs([f"{c}" for c in countries])
+            # Create tabs for each country
+            tabs = st.tabs([f"{c}" if c == 'US' else f"{c}" if c == 'CA' else f"{c}" if c == 'CN' else f"VTM 北美仓" for c in countries])
             
             for tab, country in zip(tabs, countries):
                 with tab:
                     country_data = df_with_values[df_with_values['Country'] == country]
+                    
                     st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records)")
+                    
+                    # Display warehouse type and location distribution if available
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if 'Type' in country_data.columns:
+                            type_counts = country_data['Type'].value_counts()
+                            st.info(f"Warehouse type distribution: {dict(type_counts)}")
+                    with col2:
+                        if 'Warehouse_Location' in country_data.columns:
+                            location_counts = country_data['Warehouse_Location'].value_counts()
+                            st.info(f"Warehouse location distribution: {dict(location_counts)}")
                     
                     # Report 1: Age Summary
                     st.markdown("#### Report 1: Age Summary")
                     age_summary = generate_age_summary(df_with_values, country)
+                    
                     if not age_summary.empty:
-                        st.dataframe(age_summary, use_container_width=True)
-                        all_reports[f"{country}_Age_Summary"] = age_summary
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.dataframe(
+                                age_summary.style.format({
+                                    'Inventory Qty': '{:,.0f}',
+                                    'Inventory Value': '${:,.2f}',
+                                    'Value %': '{:.1f}%'
+                                }),
+                                use_container_width=True
+                            )
+                        with col2:
+                            if st.button(f"💾 Save Age Summary", key=f"save_age_{country}"):
+                                save_to_gsheet(age_summary, country, 'age_summary')
                     
                     # Report 2: Brand ABC
-                    st.markdown("#### Report 2: Brand ABC")
+                    st.markdown("#### Report 2: Brand ABC Classification")
                     brand_abc = generate_brand_abc(df_with_values, country)
+                    
                     if not brand_abc.empty:
-                        st.dataframe(brand_abc, use_container_width=True)
-                        all_reports[f"{country}_Brand_ABC"] = brand_abc
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            # Define column order: Brand, Inventory Qty, Inventory Value, SKU Count, Value %, Cumulative %, Brand Class
+                            column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+                            # Only keep existing columns
+                            display_columns = [col for col in column_order if col in brand_abc.columns]
+                            
+                            st.dataframe(
+                                brand_abc[display_columns].style.format({
+                                    'Inventory Qty': '{:,.0f}',
+                                    'Inventory Value': '${:,.2f}',
+                                    'SKU Count': '{:,.0f}',
+                                    'Value %': '{:.2%}',
+                                    'Cumulative %': '{:.2%}'
+                                }),
+                                use_container_width=True
+                            )
+                        with col2:
+                            if st.button(f"💾 Save Brand ABC", key=f"save_brand_{country}"):
+                                save_to_gsheet(brand_abc, country, 'brand_abc')
                     
                     # Report 3: SKU ABC
-                    st.markdown("#### Report 3: SKU ABC")
+                    st.markdown("#### Report 3: SKU ABC Classification")
                     sku_abc = generate_sku_abc(df_with_values, country)
+                    
                     if not sku_abc.empty:
-                        st.dataframe(sku_abc.head(100), use_container_width=True)
-                        all_reports[f"{country}_SKU_ABC"] = sku_abc
-            
-            if all_reports:
-                st.markdown("---")
-                st.subheader("☁️ Step 6: Save All Results to Shared Drive")
-                
-                if st.button("💾 Save All Result to Shared Drive", type="primary", use_container_width=True):
-                    with st.spinner("Saving all reports to shared drive..."):
-                        today = datetime.now()
-                        sheet_name = f"{today.strftime('%Y-%m-%d')} Inventory Analysis"
-                        save_all_to_shared_drive(all_reports, sheet_name)
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
+                            available_cols = [col for col in display_cols if col in sku_abc.columns]
+                            
+                            st.dataframe(
+                                sku_abc[available_cols].head(100).style.format({
+                                    'Inventory Qty': '{:,.0f}',
+                                    'Inventory Value': '${:,.2f}',
+                                    'Value %': '{:.2%}',
+                                    'Cumulative %': '{:.2%}'
+                                }),
+                                use_container_width=True
+                            )
+                            st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
+                        with col2:
+                            if st.button(f"💾 Save SKU ABC", key=f"save_sku_{country}"):
+                                save_to_gsheet(sku_abc.head(1000), country, 'sku_abc')
             
         except Exception as e:
-            st.error(f"Error: {str(e)}")
+            st.error(f"Error processing data: {str(e)}")
             st.exception(e)
 
 if __name__ == "__main__":
