@@ -5,6 +5,9 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
 from io import BytesIO
+from openpyxl import load_workbook
+from openpyxl.styles import NamedStyle, PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Page configuration
 st.set_page_config(
@@ -608,19 +611,62 @@ def generate_sku_abc(df, country):
     
     return sku_abc
 
-# ========== 12. Function to create Excel download ==========
+# ========== 12. Function to create Excel download with percentage formatting ==========
 def create_excel_download(all_reports):
     """
     Create an Excel file with multiple sheets from all reports
+    Ensure Value % and Cumulative % columns are formatted as percentages
     """
     output = BytesIO()
     
+    # First, write all data to Excel
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         for sheet_name, df in all_reports.items():
             if not df.empty:
                 # Clean sheet name (Excel sheet names have length limit of 31 characters)
                 clean_name = sheet_name.replace('_', ' ')[:31]
-                df.to_excel(writer, sheet_name=clean_name, index=False)
+                
+                # Create a copy of the dataframe for Excel
+                df_excel = df.copy()
+                
+                # Convert percentage columns to decimal for Excel (0.xx format)
+                # Excel percentage format expects values like 0.15 for 15%
+                for col in df_excel.columns:
+                    if col in ['Value %', 'Cumulative %']:
+                        # These are already in decimal format (0.xx) from the classification function
+                        # No conversion needed, just ensure they're float
+                        df_excel[col] = pd.to_numeric(df_excel[col], errors='coerce')
+                
+                # Write to Excel
+                df_excel.to_excel(writer, sheet_name=clean_name, index=False)
+                
+                # Get the workbook and worksheet to apply formatting
+                workbook = writer.book
+                worksheet = writer.sheets[clean_name]
+                
+                # Create percentage style
+                percent_style = NamedStyle(name=f"percent_{clean_name}")
+                percent_style.number_format = '0.00%'
+                
+                # Apply percentage formatting to Value % and Cumulative % columns
+                for col_idx, col_name in enumerate(df_excel.columns, 1):  # Excel columns are 1-indexed
+                    if col_name in ['Value %', 'Cumulative %']:
+                        for row_idx in range(2, len(df_excel) + 2):  # Start from row 2 (skip header)
+                            cell = worksheet.cell(row=row_idx, column=col_idx)
+                            cell.number_format = '0.00%'
+                
+                # Auto-adjust column widths
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)  # Cap width at 50
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
     
     output.seek(0)
     return output
@@ -688,6 +734,7 @@ def main():
         
         5. **Download results**
            - One-click download all reports as Excel
+           - Value % and Cumulative % displayed as percentages
         """)
         
         st.markdown("---")
@@ -851,7 +898,7 @@ def main():
                 
                 col1, col2, col3 = st.columns(3)
                 with col2:
-                    # Generate Excel file for download
+                    # Generate Excel file for download with percentage formatting
                     excel_file = create_excel_download(all_reports)
                     
                     # Create download button
@@ -867,7 +914,7 @@ def main():
                         use_container_width=True
                     )
                     
-                    st.success(f"✅ {len(all_reports)} reports ready for download")
+                    st.success(f"✅ {len(all_reports)} reports ready for download (Value % and Cumulative % formatted as percentages)")
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
