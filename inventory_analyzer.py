@@ -4,7 +4,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
-from googleapiclient.discovery import build  # 添加这个导入
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
 
 # Page configuration
 st.set_page_config(
@@ -69,9 +70,9 @@ AGE_BANDS = [
 
 # ========== 3. Google Sheets connection function ==========
 @st.cache_resource
-def connect_to_gsheet():
+def get_credentials():
     """
-    Connect to Google Sheets
+    Get Google credentials from secrets
     """
     try:
         credentials_dict = {
@@ -90,21 +91,50 @@ def connect_to_gsheet():
                  'https://www.googleapis.com/auth/spreadsheets']
         credentials = Credentials.from_service_account_info(
             credentials_dict, scopes=scope)
-        client = gspread.authorize(credentials)
         
+        return credentials
+    except Exception as e:
+        st.error(f"Failed to get credentials: {str(e)}")
+        return None
+
+@st.cache_resource
+def connect_to_gsheet():
+    """
+    Connect to Google Sheets using credentials
+    """
+    try:
+        credentials = get_credentials()
+        if credentials is None:
+            return None
+        
+        client = gspread.authorize(credentials)
         return client
     except Exception as e:
         st.error(f"Failed to connect to Google Sheets: {str(e)}")
         return None
 
+@st.cache_resource
+def get_drive_service():
+    """
+    Get Google Drive service
+    """
+    try:
+        credentials = get_credentials()
+        if credentials is None:
+            return None
+        
+        drive_service = build('drive', 'v3', credentials=credentials)
+        return drive_service
+    except Exception as e:
+        st.error(f"Failed to create Drive service: {str(e)}")
+        return None
+
 # ========== 4. Get or create main folder in Google Drive ==========
-def get_or_create_main_folder(client, folder_name="Inventory ABC Analyzer"):
+def get_or_create_main_folder(drive_service, folder_name="Inventory ABC Analyzer"):
     """
     Get or create the main folder in Google Drive
     """
     try:
-        drive_service = build('drive', 'v3', credentials=client.auth)
-        
         # Search for existing folder
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
         results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
@@ -131,13 +161,11 @@ def get_or_create_main_folder(client, folder_name="Inventory ABC Analyzer"):
         return None
 
 # ========== 5. Get or create year subfolder in main folder ==========
-def get_or_create_year_folder(client, main_folder_id, year):
+def get_or_create_year_folder(drive_service, main_folder_id, year):
     """
     Get or create a year subfolder in the main folder
     """
     try:
-        drive_service = build('drive', 'v3', credentials=client.auth)
-        
         # Search for existing year folder in main folder
         query = f"name='{year}' and mimeType='application/vnd.google-apps.folder' and '{main_folder_id}' in parents and trashed=false"
         results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
@@ -163,15 +191,13 @@ def get_or_create_year_folder(client, main_folder_id, year):
         return None
 
 # ========== 6. Create Google Sheet in year folder ==========
-def create_sheet_in_folder(client, folder_id, sheet_name):
+def create_sheet_in_folder(drive_service, gsheet_client, folder_id, sheet_name):
     """
     Create a new Google Sheet in the specified folder
     """
     try:
-        drive_service = build('drive', 'v3', credentials=client.auth)
-        
         # Create the spreadsheet
-        spreadsheet = client.create(sheet_name)
+        spreadsheet = gsheet_client.create(sheet_name)
         file_id = spreadsheet.id
         
         # Move to folder
@@ -642,12 +668,16 @@ def save_all_to_cloud(all_reports, sheet_name):
     Organized in: Main Folder "Inventory ABC Analyzer" → Year Subfolder → Spreadsheet
     """
     try:
-        client = connect_to_gsheet()
-        if client is None:
+        gsheet_client = connect_to_gsheet()
+        if gsheet_client is None:
+            return False
+        
+        drive_service = get_drive_service()
+        if drive_service is None:
             return False
         
         # Get or create main folder "Inventory ABC Analyzer"
-        main_folder_id = get_or_create_main_folder(client, "Inventory ABC Analyzer")
+        main_folder_id = get_or_create_main_folder(drive_service, "Inventory ABC Analyzer")
         if main_folder_id is None:
             st.error("Failed to create or access main folder")
             return False
@@ -656,13 +686,13 @@ def save_all_to_cloud(all_reports, sheet_name):
         current_year = str(datetime.now().year)
         
         # Get or create year subfolder in main folder
-        year_folder_id = get_or_create_year_folder(client, main_folder_id, current_year)
+        year_folder_id = get_or_create_year_folder(drive_service, main_folder_id, current_year)
         if year_folder_id is None:
             st.error(f"Failed to create or access year folder: {current_year}")
             return False
         
         # Create new spreadsheet in the year folder
-        spreadsheet = create_sheet_in_folder(client, year_folder_id, sheet_name)
+        spreadsheet = create_sheet_in_folder(drive_service, gsheet_client, year_folder_id, sheet_name)
         if spreadsheet is None:
             st.error("Failed to create spreadsheet")
             return False
