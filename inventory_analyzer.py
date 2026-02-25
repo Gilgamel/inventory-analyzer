@@ -11,13 +11,13 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Page configuration
 st.set_page_config(
-    page_title="Inventory ABC Analysis System",
+    page_title="Inventory ABC Classification Analyzer",
     page_icon="📊",
     layout="wide"
 )
 
 # Title
-st.title("📊 Inventory ABC Classification Analysis System")
+st.title("📊 Inventory ABC Classification Analyzer")
 st.markdown("---")
 
 # ========== 1. Column name mapping (Your original column names) ==========
@@ -706,7 +706,7 @@ def demonstrate_abc_logic():
 
 # ========== 14. Main program ==========
 def main():
-    st.sidebar.header("⚙️ System Information")
+    st.sidebar.header("⚙️ Analyzer Information")
     
     # Display system architecture
     with st.sidebar:
