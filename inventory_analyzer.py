@@ -5,7 +5,6 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
 from googleapiclient.discovery import build
-from google.oauth2 import service_account
 
 # Page configuration
 st.set_page_config(
@@ -129,31 +128,36 @@ def get_drive_service():
         st.error(f"Failed to create Drive service: {str(e)}")
         return None
 
-# ========== 4. Get or create main folder in Google Drive ==========
+# ========== 4. Get or create main folder in YOUR Google Drive ==========
 def get_or_create_main_folder(drive_service, folder_name="Inventory ABC Analyzer"):
     """
-    Get or create the main folder in Google Drive
+    Get or create the main folder in YOUR personal Google Drive
     """
     try:
-        # Search for existing folder
+        # Search for existing folder in your Drive
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+        results = drive_service.files().list(
+            q=query, 
+            spaces='drive', 
+            fields='files(id, name)',
+            corpora='user'  # This ensures we search in user's Drive, not service account's
+        ).execute()
         items = results.get('files', [])
         
         if items:
-            # Folder exists
+            # Folder exists in your Drive
             folder_id = items[0]['id']
-            st.info(f"Found existing main folder: {folder_name}")
+            st.info(f"Found existing main folder in your Drive: {folder_name}")
             return folder_id
         else:
-            # Create new folder
+            # Create new folder in your Drive
             file_metadata = {
                 'name': folder_name,
                 'mimeType': 'application/vnd.google-apps.folder'
             }
             folder = drive_service.files().create(body=file_metadata, fields='id').execute()
             folder_id = folder.get('id')
-            st.success(f"Created new main folder: {folder_name}")
+            st.success(f"Created new main folder in your Drive: {folder_name}")
             return folder_id
             
     except Exception as e:
@@ -163,12 +167,16 @@ def get_or_create_main_folder(drive_service, folder_name="Inventory ABC Analyzer
 # ========== 5. Get or create year subfolder in main folder ==========
 def get_or_create_year_folder(drive_service, main_folder_id, year):
     """
-    Get or create a year subfolder in the main folder
+    Get or create a year subfolder in the main folder (in your Drive)
     """
     try:
         # Search for existing year folder in main folder
         query = f"name='{year}' and mimeType='application/vnd.google-apps.folder' and '{main_folder_id}' in parents and trashed=false"
-        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+        results = drive_service.files().list(
+            q=query, 
+            spaces='drive', 
+            fields='files(id, name)'
+        ).execute()
         items = results.get('files', [])
         
         if items:
@@ -193,7 +201,7 @@ def get_or_create_year_folder(drive_service, main_folder_id, year):
 # ========== 6. Create Google Sheet in year folder ==========
 def create_sheet_in_folder(drive_service, gsheet_client, folder_id, sheet_name):
     """
-    Create a new Google Sheet in the specified folder
+    Create a new Google Sheet in the specified folder (in your Drive)
     """
     try:
         # Create the spreadsheet
@@ -661,11 +669,12 @@ def generate_sku_abc(df, country):
     
     return sku_abc
 
-# ========== 15. Save all reports to Google Sheets ==========
+# ========== 15. Save all reports to YOUR Google Drive ==========
 def save_all_to_cloud(all_reports, sheet_name):
     """
     Save all reports to a single Google Sheet with multiple worksheets
     Organized in: Main Folder "Inventory ABC Analyzer" → Year Subfolder → Spreadsheet
+    All files are stored in YOUR personal Google Drive, not the service account's Drive
     """
     try:
         gsheet_client = connect_to_gsheet()
@@ -676,10 +685,10 @@ def save_all_to_cloud(all_reports, sheet_name):
         if drive_service is None:
             return False
         
-        # Get or create main folder "Inventory ABC Analyzer"
+        # Get or create main folder "Inventory ABC Analyzer" in YOUR Drive
         main_folder_id = get_or_create_main_folder(drive_service, "Inventory ABC Analyzer")
         if main_folder_id is None:
-            st.error("Failed to create or access main folder")
+            st.error("Failed to create or access main folder in your Drive")
             return False
         
         # Get current year
@@ -703,7 +712,6 @@ def save_all_to_cloud(all_reports, sheet_name):
             if not report_df.empty:
                 try:
                     # Clean worksheet name (remove special characters, limit length)
-                    # Format: "US Age Summary", "CA Brand ABC", etc.
                     clean_name = report_name.replace('_', ' ')[:50]
                     
                     # Create worksheet
@@ -740,21 +748,34 @@ def save_all_to_cloud(all_reports, sheet_name):
         except:
             pass
         
+        # Get the folder link for user reference
+        folder_link = f"https://drive.google.com/drive/folders/{year_folder_id}"
+        
         st.success(f"""
-        ✅ All reports saved successfully!
+        ✅ All reports saved successfully to YOUR Google Drive!
         - Main Folder: Inventory ABC Analyzer
         - Year Folder: {current_year}
         - Spreadsheet: {sheet_name}
         - Total worksheets: {worksheet_count}
         """)
         
-        # Provide link to the spreadsheet
-        st.markdown(f"🔗 [Open in Google Sheets](https://docs.google.com/spreadsheets/d/{spreadsheet.id})")
+        # Provide links
+        st.markdown(f"📁 [Open Year Folder in Google Drive]({folder_link})")
+        st.markdown(f"📊 [Open Spreadsheet in Google Sheets](https://docs.google.com/spreadsheets/d/{spreadsheet.id})")
         
         return True
         
     except Exception as e:
-        st.error(f"Failed to save to cloud: {str(e)}")
+        if "storage quota has been exceeded" in str(e):
+            st.error("⚠️ **Storage quota exceeded!** But don't worry - this is your personal Drive quota.")
+            st.info("""
+            **Solutions:**
+            1. Free up space in your Google Drive
+            2. Delete old analysis files
+            3. Upgrade your Google Drive storage
+            """)
+        else:
+            st.error(f"Failed to save to cloud: {str(e)}")
         return False
 
 # ========== 16. Function to demonstrate ABC classification logic ==========
@@ -816,7 +837,7 @@ def main():
            - Items crossing thresholds included in previous class
         
         5. **Save all results**
-           - One-click save to Google Drive
+           - One-click save to YOUR Google Drive
            - Organized in "Inventory ABC Analyzer" → Year folder
            - Single spreadsheet with multiple worksheets
         """)
@@ -970,12 +991,12 @@ def main():
             # ===== Step 6: Save all results to cloud =====
             if all_reports:
                 st.markdown("---")
-                st.subheader("☁️ Step 6: Save All Results to Cloud")
+                st.subheader("☁️ Step 6: Save All Results to Your Google Drive")
                 
                 col1, col2, col3 = st.columns(3)
                 with col2:
                     if st.button("💾 Save All Result to Cloud", type="primary", use_container_width=True):
-                        with st.spinner("Saving all reports to Google Drive..."):
+                        with st.spinner("Saving all reports to your Google Drive..."):
                             # Prepare sheet name with current date
                             today = datetime.now()
                             sheet_name = f"{today.strftime('%Y-%m-%d')} Inventory Analysis"
