@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
+from googleapiclient.discovery import build  # 添加这个导入
 
 # Page configuration
 st.set_page_config(
@@ -96,17 +97,15 @@ def connect_to_gsheet():
         st.error(f"Failed to connect to Google Sheets: {str(e)}")
         return None
 
-# ========== 4. Create folder in Google Drive if not exists ==========
-def get_or_create_folder(client, folder_name):
+# ========== 4. Get or create main folder in Google Drive ==========
+def get_or_create_main_folder(client, folder_name="Inventory ABC Analyzer"):
     """
-    Get or create a folder in Google Drive
+    Get or create the main folder in Google Drive
     """
     try:
-        # Search for existing folder
-        from googleapiclient.discovery import build
         drive_service = build('drive', 'v3', credentials=client.auth)
         
-        # Search for folder with given name
+        # Search for existing folder
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
         results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         items = results.get('files', [])
@@ -114,7 +113,7 @@ def get_or_create_folder(client, folder_name):
         if items:
             # Folder exists
             folder_id = items[0]['id']
-            st.info(f"Found existing folder: {folder_name}")
+            st.info(f"Found existing main folder: {folder_name}")
             return folder_id
         else:
             # Create new folder
@@ -124,20 +123,51 @@ def get_or_create_folder(client, folder_name):
             }
             folder = drive_service.files().create(body=file_metadata, fields='id').execute()
             folder_id = folder.get('id')
-            st.success(f"Created new folder: {folder_name}")
+            st.success(f"Created new main folder: {folder_name}")
             return folder_id
             
     except Exception as e:
-        st.error(f"Error creating folder: {str(e)}")
+        st.error(f"Error creating main folder: {str(e)}")
         return None
 
-# ========== 5. Create Google Sheet in specific folder ==========
+# ========== 5. Get or create year subfolder in main folder ==========
+def get_or_create_year_folder(client, main_folder_id, year):
+    """
+    Get or create a year subfolder in the main folder
+    """
+    try:
+        drive_service = build('drive', 'v3', credentials=client.auth)
+        
+        # Search for existing year folder in main folder
+        query = f"name='{year}' and mimeType='application/vnd.google-apps.folder' and '{main_folder_id}' in parents and trashed=false"
+        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+        items = results.get('files', [])
+        
+        if items:
+            # Folder exists
+            folder_id = items[0]['id']
+            return folder_id
+        else:
+            # Create new year folder in main folder
+            file_metadata = {
+                'name': str(year),
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [main_folder_id]
+            }
+            folder = drive_service.files().create(body=file_metadata, fields='id').execute()
+            folder_id = folder.get('id')
+            return folder_id
+            
+    except Exception as e:
+        st.error(f"Error creating year folder: {str(e)}")
+        return None
+
+# ========== 6. Create Google Sheet in year folder ==========
 def create_sheet_in_folder(client, folder_id, sheet_name):
     """
     Create a new Google Sheet in the specified folder
     """
     try:
-        from googleapiclient.discovery import build
         drive_service = build('drive', 'v3', credentials=client.auth)
         
         # Create the spreadsheet
@@ -156,7 +186,7 @@ def create_sheet_in_folder(client, folder_id, sheet_name):
         st.error(f"Error creating sheet: {str(e)}")
         return None
 
-# ========== 6. Load static Warehouse Region mapping table ==========
+# ========== 7. Load static Warehouse Region mapping table ==========
 @st.cache_data(ttl=3600)
 def load_warehouse_region_mapping():
     """
@@ -218,7 +248,7 @@ def load_warehouse_region_mapping():
         st.error(f"Failed to load warehouse mapping table: {str(e)}")
         return None
 
-# ========== 7. JOIN inventory data with warehouse mapping table ==========
+# ========== 8. JOIN inventory data with warehouse mapping table ==========
 def join_with_warehouse_region(inventory_df, mapping_df):
     """
     JOIN inventory data with warehouse region table
@@ -302,7 +332,7 @@ def join_with_warehouse_region(inventory_df, mapping_df):
     
     return merged_df
 
-# ========== 8. Data preprocessing function ==========
+# ========== 9. Data preprocessing function ==========
 def preprocess_data(df):
     """
     Data preprocessing: rename columns
@@ -327,7 +357,7 @@ def preprocess_data(df):
     
     return df_copy
 
-# ========== 9. Calculate inventory value by age band ==========
+# ========== 10. Calculate inventory value by age band ==========
 def calculate_age_band_values(df):
     """
     Calculate inventory value for each SKU by age band
@@ -356,7 +386,7 @@ def calculate_age_band_values(df):
     
     return result
 
-# ========== 10. Modified ABC classification function ==========
+# ========== 11. Modified ABC classification function ==========
 def abc_classification(df, value_col, group_col=None):
     """
     ABC classification function - Modified version
@@ -463,7 +493,7 @@ def abc_classification(df, value_col, group_col=None):
         
         return sorted_df
 
-# ========== 11. Generate Report 1: Age Summary ==========
+# ========== 12. Generate Report 1: Age Summary ==========
 def generate_age_summary(df, country):
     """
     Generate age summary report
@@ -503,7 +533,7 @@ def generate_age_summary(df, country):
     
     return summary_df
 
-# ========== 12. Generate Report 2: Brand ABC Classification ==========
+# ========== 13. Generate Report 2: Brand ABC Classification ==========
 def generate_brand_abc(df, country):
     """
     Generate brand ABC classification report
@@ -547,7 +577,7 @@ def generate_brand_abc(df, country):
     
     return brand_abc
 
-# ========== 13. Generate Report 3: SKU ABC Classification ==========
+# ========== 14. Generate Report 3: SKU ABC Classification ==========
 def generate_sku_abc(df, country):
     """
     Generate SKU ABC classification report
@@ -605,37 +635,49 @@ def generate_sku_abc(df, country):
     
     return sku_abc
 
-# ========== 14. Save all reports to Google Sheets ==========
-def save_all_to_cloud(all_reports, sheet_name, folder_year):
+# ========== 15. Save all reports to Google Sheets ==========
+def save_all_to_cloud(all_reports, sheet_name):
     """
     Save all reports to a single Google Sheet with multiple worksheets
+    Organized in: Main Folder "Inventory ABC Analyzer" → Year Subfolder → Spreadsheet
     """
     try:
         client = connect_to_gsheet()
         if client is None:
             return False
         
-        # Get or create year folder
-        folder_id = get_or_create_folder(client, folder_year)
-        if folder_id is None:
-            st.error("Failed to create or access folder")
+        # Get or create main folder "Inventory ABC Analyzer"
+        main_folder_id = get_or_create_main_folder(client, "Inventory ABC Analyzer")
+        if main_folder_id is None:
+            st.error("Failed to create or access main folder")
             return False
         
-        # Create new spreadsheet in the folder
-        spreadsheet = create_sheet_in_folder(client, folder_id, sheet_name)
+        # Get current year
+        current_year = str(datetime.now().year)
+        
+        # Get or create year subfolder in main folder
+        year_folder_id = get_or_create_year_folder(client, main_folder_id, current_year)
+        if year_folder_id is None:
+            st.error(f"Failed to create or access year folder: {current_year}")
+            return False
+        
+        # Create new spreadsheet in the year folder
+        spreadsheet = create_sheet_in_folder(client, year_folder_id, sheet_name)
         if spreadsheet is None:
             st.error("Failed to create spreadsheet")
             return False
         
         # Add each report as a worksheet
+        worksheet_count = 0
         for report_name, report_df in all_reports.items():
             if not report_df.empty:
                 try:
                     # Clean worksheet name (remove special characters, limit length)
-                    worksheet_name = report_name[:50]  # Google Sheets limit is 100 chars
+                    # Format: "US Age Summary", "CA Brand ABC", etc.
+                    clean_name = report_name.replace('_', ' ')[:50]
                     
                     # Create worksheet
-                    worksheet = spreadsheet.add_worksheet(title=worksheet_name, rows=len(report_df)+1, cols=len(report_df.columns))
+                    worksheet = spreadsheet.add_worksheet(title=clean_name, rows=len(report_df)+1, cols=len(report_df.columns))
                     
                     # Add timestamp columns
                     report_df = report_df.copy()
@@ -654,7 +696,8 @@ def save_all_to_cloud(all_reports, sheet_name, folder_year):
                         batch = records[i:i+batch_size]
                         worksheet.append_rows(batch, value_input_option='USER_ENTERED')
                     
-                    st.info(f"✅ Added worksheet: {worksheet_name} ({len(report_df)} rows)")
+                    worksheet_count += 1
+                    st.info(f"✅ Added worksheet: {clean_name} ({len(report_df)} rows)")
                     
                 except Exception as e:
                     st.warning(f"Failed to add worksheet {report_name}: {str(e)}")
@@ -669,9 +712,10 @@ def save_all_to_cloud(all_reports, sheet_name, folder_year):
         
         st.success(f"""
         ✅ All reports saved successfully!
+        - Main Folder: Inventory ABC Analyzer
+        - Year Folder: {current_year}
         - Spreadsheet: {sheet_name}
-        - Location: Folder '{folder_year}'
-        - Total worksheets: {len([r for r in all_reports.values() if not r.empty])}
+        - Total worksheets: {worksheet_count}
         """)
         
         # Provide link to the spreadsheet
@@ -683,7 +727,7 @@ def save_all_to_cloud(all_reports, sheet_name, folder_year):
         st.error(f"Failed to save to cloud: {str(e)}")
         return False
 
-# ========== 15. Function to demonstrate ABC classification logic ==========
+# ========== 16. Function to demonstrate ABC classification logic ==========
 def demonstrate_abc_logic():
     """
     Demonstrate the modified ABC classification logic
@@ -716,7 +760,7 @@ def demonstrate_abc_logic():
     - Item6 (2%): cumulative 100% → C class
     """)
 
-# ========== 16. Main program ==========
+# ========== 17. Main program ==========
 def main():
     st.sidebar.header("⚙️ System Information")
     
@@ -743,7 +787,7 @@ def main():
         
         5. **Save all results**
            - One-click save to Google Drive
-           - Organized by year folder
+           - Organized in "Inventory ABC Analyzer" → Year folder
            - Single spreadsheet with multiple worksheets
         """)
         
@@ -905,10 +949,9 @@ def main():
                             # Prepare sheet name with current date
                             today = datetime.now()
                             sheet_name = f"{today.strftime('%Y-%m-%d')} Inventory Analysis"
-                            folder_year = str(today.year)
                             
                             # Save all reports
-                            save_all_to_cloud(all_reports, sheet_name, folder_year)
+                            save_all_to_cloud(all_reports, sheet_name)
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")

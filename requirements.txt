@@ -21,3 +21,5 @@ pytz==2025.2
 python-dotenv==1.1.0             # 环境变量管理
 pytest==9.0.2                    # 单元测试
 black==26.1.0                    # 代码格式化
+
+google-api-python-client
