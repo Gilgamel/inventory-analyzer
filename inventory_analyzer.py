@@ -6,7 +6,7 @@ from datetime import datetime
 import numpy as np
 from io import BytesIO
 from openpyxl import load_workbook
-from openpyxl.styles import NamedStyle, PatternFill, Font, Alignment, Border, Side
+from openpyxl.styles import NamedStyle
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Page configuration
@@ -466,6 +466,7 @@ def abc_classification(df, value_col, group_col=None):
 def generate_age_summary(df, country):
     """
     Generate age summary report
+    Value % is returned as decimal (e.g., 0.15 for 15%)
     """
     if 'Country' not in df.columns:
         return pd.DataFrame()
@@ -496,7 +497,8 @@ def generate_age_summary(df, country):
     
     summary_df = pd.DataFrame(age_summary)
     total_value = summary_df['Inventory Value'].sum()
-    summary_df['Value %'] = (summary_df['Inventory Value'] / total_value * 100).round(2)
+    # Return as decimal (not multiplied by 100) for consistency with other reports
+    summary_df['Value %'] = (summary_df['Inventory Value'] / total_value).round(4)
     
     return summary_df
 
@@ -504,6 +506,7 @@ def generate_age_summary(df, country):
 def generate_brand_abc(df, country):
     """
     Generate brand ABC classification report
+    Value % and Cumulative % are returned as decimals
     """
     if 'Country' not in df.columns or 'Brand' not in df.columns:
         return pd.DataFrame()
@@ -549,6 +552,7 @@ def generate_sku_abc(df, country):
     """
     Generate SKU ABC classification report
     Sort by Brand Class from A to Z, then by Inventory Value from high to low within each Brand Class
+    Value % and Cumulative % are returned as decimals
     """
     if 'Country' not in df.columns:
         return pd.DataFrame()
@@ -616,6 +620,7 @@ def create_excel_download(all_reports):
     """
     Create an Excel file with multiple sheets from all reports
     Ensure Value % and Cumulative % columns are formatted as percentages
+    All percentage values should be in decimal format (0.xx) for Excel formatting
     """
     output = BytesIO()
     
@@ -629,12 +634,9 @@ def create_excel_download(all_reports):
                 # Create a copy of the dataframe for Excel
                 df_excel = df.copy()
                 
-                # Convert percentage columns to decimal for Excel (0.xx format)
-                # Excel percentage format expects values like 0.15 for 15%
+                # Ensure percentage columns are float (they should already be in decimal format)
                 for col in df_excel.columns:
                     if col in ['Value %', 'Cumulative %']:
-                        # These are already in decimal format (0.xx) from the classification function
-                        # No conversion needed, just ensure they're float
                         df_excel[col] = pd.to_numeric(df_excel[col], errors='coerce')
                 
                 # Write to Excel
@@ -643,10 +645,6 @@ def create_excel_download(all_reports):
                 # Get the workbook and worksheet to apply formatting
                 workbook = writer.book
                 worksheet = writer.sheets[clean_name]
-                
-                # Create percentage style
-                percent_style = NamedStyle(name=f"percent_{clean_name}")
-                percent_style.number_format = '0.00%'
                 
                 # Apply percentage formatting to Value % and Cumulative % columns
                 for col_idx, col_name in enumerate(df_excel.columns, 1):  # Excel columns are 1-indexed
@@ -838,7 +836,7 @@ def main():
                             age_summary.style.format({
                                 'Inventory Qty': '{:,.0f}',
                                 'Inventory Value': '${:,.2f}',
-                                'Value %': '{:.1f}%'
+                                'Value %': '{:.2%}'  # Format as percentage
                             }),
                             use_container_width=True
                         )
@@ -914,7 +912,7 @@ def main():
                         use_container_width=True
                     )
                     
-                    st.success(f"✅ {len(all_reports)} reports ready for download (Value % and Cumulative % formatted as percentages)")
+                    st.success(f"✅ {len(all_reports)} reports ready for download (all percentages formatted consistently)")
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
