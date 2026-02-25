@@ -912,7 +912,7 @@ def main():
                         use_container_width=True
                     )
                     
-                    st.success(f"✅ {len(all_reports)} reports ready for download (all percentages formatted consistently)")
+                    st.success(f"✅ {len(all_reports)} reports ready for download")
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
