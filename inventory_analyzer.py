@@ -910,7 +910,7 @@ def main():
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         type="primary",
-                        use_container_width=False
+                        use_container_width=True
                     )
                     
                     st.success(f"✅ {len(all_reports)} reports ready for download")
