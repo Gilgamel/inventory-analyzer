@@ -851,7 +851,7 @@ def main():
                     
                     if not brand_abc.empty:
                         # Define column order for display
-                        column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+                        column_order = ['Brand', 'SKU Count', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'Brand Class']
                         display_columns = [col for col in column_order if col in brand_abc.columns]
                         
                         st.dataframe(
