@@ -836,7 +836,7 @@ def main():
                         st.dataframe(
                             age_summary.style.format({
                                 'Inventory Qty': '{:,.0f}',
-                                'Inventory Value': '${:,.2f}',
+                                'Inventory Value': '￥{:,.2f}',
                                 'Value %': '{:.2%}'  # Format as percentage
                             }),
                             use_container_width=True
@@ -857,7 +857,7 @@ def main():
                         st.dataframe(
                             brand_abc[display_columns].style.format({
                                 'Inventory Qty': '{:,.0f}',
-                                'Inventory Value': '${:,.2f}',
+                                'Inventory Value': '￥{:,.2f}',
                                 'SKU Count': '{:,.0f}',
                                 'Value %': '{:.2%}',
                                 'Cumulative %': '{:.2%}'
@@ -879,7 +879,7 @@ def main():
                         st.dataframe(
                             sku_abc[available_cols].head(100).style.format({
                                 'Inventory Qty': '{:,.0f}',
-                                'Inventory Value': '${:,.2f}',
+                                'Inventory Value': '￥{:,.2f}',
                                 'Value %': '{:.2%}',
                                 'Cumulative %': '{:.2%}'
                             }),
