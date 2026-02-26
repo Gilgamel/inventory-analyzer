@@ -815,7 +815,7 @@ def main():
                     country_data = df_with_values[df_with_values['Country'] == country]
                     
                     st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records)")
-                    st.markdown(f"**Inventory value in CN")
+                    st.markdown(f"**Inventory value is calculated in RMB**")
                     
                     # Display warehouse type and location distribution if available
                     col1, col2 = st.columns(2)
