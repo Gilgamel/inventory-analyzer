@@ -895,7 +895,7 @@ def main():
                 st.markdown("---")
                 st.subheader("📥 Step 6: Download All Results")
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3 = st.columns([2,1,2])
                 with col2:
                     # Generate Excel file for download with percentage formatting
                     excel_file = create_excel_download(all_reports)
