@@ -862,7 +862,7 @@ def main():
                                 'Value %': '{:.2%}',
                                 'Cumulative %': '{:.2%}'
                             }),
-                            use_container_width=True
+                            use_container_width=False
                         )
                         # Store in dictionary for download
                         report_key = f"{country}_Brand_ABC"
@@ -883,7 +883,7 @@ def main():
                                 'Value %': '{:.2%}',
                                 'Cumulative %': '{:.2%}'
                             }),
-                            use_container_width=True
+                            use_container_width=False
                         )
                         st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
                         # Store in dictionary for download
