@@ -337,7 +337,36 @@ def calculate_age_band_values(df):
     
     return result
 
-# ========== 8. Modified ABC classification function ==========
+# ========== 8. Filter data by age band ==========
+def filter_by_age_band(df, age_band_name):
+    """
+    Filter dataframe to include only SKUs with value in the selected age band
+    If age_band_name is None or 'All Data', return original dataframe
+    """
+    if age_band_name is None or age_band_name == 'All Data':
+        return df
+    
+    # Find the age band
+    selected_band = None
+    for band in AGE_BANDS:
+        if band['name'] == age_band_name:
+            selected_band = band
+            break
+    
+    if selected_band is None:
+        return df
+    
+    # Get the value column for this age band
+    value_col = f"{selected_band['name']}_Value"
+    
+    # Filter to keep only SKUs with value in this age band
+    if value_col in df.columns:
+        filtered_df = df[df[value_col] > 0].copy()
+        return filtered_df
+    else:
+        return df
+
+# ========== 9. Modified ABC classification function ==========
 def abc_classification(df, value_col, group_col=None):
     """
     ABC classification function - Modified version
@@ -462,7 +491,7 @@ def abc_classification(df, value_col, group_col=None):
         
         return sorted_df
 
-# ========== 9. Generate Report 1: Age Summary ==========
+# ========== 10. Generate Report 1: Age Summary ==========
 def generate_age_summary(df, country):
     """
     Generate age summary report
@@ -502,21 +531,29 @@ def generate_age_summary(df, country):
     
     return summary_df
 
-# ========== 10. Generate Report 2: Brand ABC Classification ==========
-def generate_brand_abc(df, country):
+# ========== 11. Generate Report 2: Brand ABC Classification ==========
+def generate_brand_abc(df, country, age_band=None):
     """
     Generate brand ABC classification report
     Value % and Cumulative % are returned as decimals
+    Can filter by age band if specified
     """
     if 'Country' not in df.columns or 'Brand' not in df.columns:
         return pd.DataFrame()
     
+    # Filter by country
     country_df = df[df['Country'] == country].copy()
     
-    if len(country_df) == 0:
+    # Filter by age band if specified
+    if age_band and age_band != 'All Data':
+        filtered_df = filter_by_age_band(country_df, age_band)
+    else:
+        filtered_df = country_df
+    
+    if len(filtered_df) == 0:
         return pd.DataFrame()
     
-    brand_summary = country_df.groupby('Brand').agg({
+    brand_summary = filtered_df.groupby('Brand').agg({
         'Total_Value': 'sum',
         'SKU': 'count',
         'Total_Inventory': 'sum'
@@ -542,41 +579,49 @@ def generate_brand_abc(df, country):
     })
     
     # Define column order to match Streamlit display
-    column_order = ['Brand', 'Inventory Qty', 'Inventory Value', 'SKU Count', 'Value %', 'Cumulative %', 'Brand Class']
+    column_order = ['Brand', 'SKU Count', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'Brand Class']
     brand_abc = brand_abc[[col for col in column_order if col in brand_abc.columns]]
     
     return brand_abc
 
-# ========== 11. Generate Report 3: SKU ABC Classification ==========
-def generate_sku_abc(df, country):
+# ========== 12. Generate Report 3: SKU ABC Classification ==========
+def generate_sku_abc(df, country, age_band=None):
     """
     Generate SKU ABC classification report
     Sort by Brand Class from A to Z, then by Inventory Value from high to low within each Brand Class
     Value % and Cumulative % are returned as decimals
+    Can filter by age band if specified
     """
     if 'Country' not in df.columns:
         return pd.DataFrame()
     
+    # Filter by country
     country_df = df[df['Country'] == country].copy()
     
-    if len(country_df) == 0:
+    # Filter by age band if specified
+    if age_band and age_band != 'All Data':
+        filtered_df = filter_by_age_band(country_df, age_band)
+    else:
+        filtered_df = country_df
+    
+    if len(filtered_df) == 0:
         return pd.DataFrame()
     
     # Prepare SKU-level data
     sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Inventory']
-    available_cols = [col for col in sku_cols if col in country_df.columns]
+    available_cols = [col for col in sku_cols if col in filtered_df.columns]
     
     if not available_cols:
         return pd.DataFrame()
     
-    sku_data = country_df[available_cols].copy()
+    sku_data = filtered_df[available_cols].copy()
     sku_data = sku_data[sku_data['Total_Value'] > 0]
     
     if len(sku_data) == 0:
         return pd.DataFrame()
     
-    # Get brand classification
-    brand_abc = generate_brand_abc(df, country)
+    # Get brand classification (using the same age band for consistency)
+    brand_abc = generate_brand_abc(df, country, age_band)
     if len(brand_abc) > 0 and 'Brand' in brand_abc.columns:
         brand_class_map = dict(zip(brand_abc['Brand'], brand_abc['Brand Class']))
         sku_data['Brand Class'] = sku_data['Brand'].map(brand_class_map)
@@ -615,7 +660,7 @@ def generate_sku_abc(df, country):
     
     return sku_abc
 
-# ========== 12. Function to create Excel download with percentage formatting ==========
+# ========== 13. Function to create Excel download with percentage formatting ==========
 def create_excel_download(all_reports):
     """
     Create an Excel file with multiple sheets from all reports
@@ -669,7 +714,7 @@ def create_excel_download(all_reports):
     output.seek(0)
     return output
 
-# ========== 13. Function to demonstrate ABC classification logic ==========
+# ========== 14. Function to demonstrate ABC classification logic ==========
 def demonstrate_abc_logic():
     """
     Demonstrate the modified ABC classification logic
@@ -704,7 +749,7 @@ def demonstrate_abc_logic():
     - Item6 (2%): cumulative 100% → C class
     """)
 
-# ========== 14. Main program ==========
+# ========== 15. Main program ==========
 def main():
     st.sidebar.header("⚙️ Analyzer Information")
     
@@ -726,11 +771,14 @@ def main():
            - Inventory.Warehouse = Mapping.Warehouse
            - Add Country, Warehouse Location, Type, Description
         
-        4. **Analysis by country**
+        4. **Filter by Age Band** (optional)
+           - Select specific age band for analysis
+        
+        5. **Analysis by country**
            - Using ABC classification logic
            - Items crossing thresholds included in previous class
         
-        5. **Download results**
+        6. **Download results**
            - One-click download all reports as Excel
            - Value % and Cumulative % displayed as percentages
         """)
@@ -787,8 +835,25 @@ def main():
             st.subheader("💰 Step 4: Calculate Inventory Value")
             df_with_values = calculate_age_band_values(df_processed)
             
-            # ===== Step 5: Analysis by country =====
-            st.subheader("📊 Step 5: Generate Analysis Reports")
+            # ===== Step 5: Age Band Selection =====
+            st.subheader("📅 Step 5: Select Age Band for Analysis")
+            
+            # Create age band options
+            age_band_options = ['All Data'] + [band['name'] for band in AGE_BANDS]
+            selected_age_band = st.selectbox(
+                "Select Age Band (optional):",
+                options=age_band_options,
+                index=0,
+                help="Select a specific age band to analyze only that inventory. 'All Data' includes all age bands."
+            )
+            
+            if selected_age_band != 'All Data':
+                # Show filter information
+                filtered_count = len(filter_by_age_band(df_with_values, selected_age_band))
+                st.info(f"Filtering to show only SKUs with {selected_age_band} inventory. Found {filtered_count} SKUs with this age band.")
+            
+            # ===== Step 6: Analysis by country =====
+            st.subheader("📊 Step 6: Generate Analysis Reports")
             
             # Get unique countries
             if 'Country' not in df_with_values.columns:
@@ -812,9 +877,16 @@ def main():
             
             for tab, country in zip(tabs, countries):
                 with tab:
+                    # Get country data
                     country_data = df_with_values[df_with_values['Country'] == country]
                     
-                    st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records)")
+                    # Apply age band filter for display info
+                    if selected_age_band != 'All Data':
+                        filtered_country_data = filter_by_age_band(country_data, selected_age_band)
+                        st.markdown(f"### {country} Inventory Analysis ({len(filtered_country_data)} records after {selected_age_band} filter)")
+                    else:
+                        st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records)")
+                    
                     st.markdown(f"**Inventory value is calculated in RMB**")
                     
                     # Display warehouse type and location distribution if available
@@ -828,7 +900,7 @@ def main():
                             location_counts = country_data['Warehouse_Location'].value_counts()
                             st.info(f"Warehouse location distribution: {dict(location_counts)}")
                     
-                    # Report 1: Age Summary
+                    # Report 1: Age Summary (always shows all age bands, regardless of filter)
                     st.markdown("#### Report 1: Age Summary")
                     age_summary = generate_age_summary(df_with_values, country)
                     
@@ -837,7 +909,7 @@ def main():
                             age_summary.style.format({
                                 'Inventory Qty': '{:,.0f}',
                                 'Inventory Value': '￥{:,.2f}',
-                                'Value %': '{:.2%}'  # Format as percentage
+                                'Value %': '{:.2%}'
                             }),
                             use_container_width=False
                         )
@@ -845,9 +917,9 @@ def main():
                         report_key = f"{country}_Age_Summary"
                         all_reports[report_key] = age_summary
                     
-                    # Report 2: Brand ABC
+                    # Report 2: Brand ABC (with age band filter)
                     st.markdown("#### Report 2: Brand ABC Classification")
-                    brand_abc = generate_brand_abc(df_with_values, country)
+                    brand_abc = generate_brand_abc(df_with_values, country, selected_age_band)
                     
                     if not brand_abc.empty:
                         # Define column order for display
@@ -864,13 +936,17 @@ def main():
                             }),
                             use_container_width=True
                         )
-                        # Store in dictionary for download
-                        report_key = f"{country}_Brand_ABC"
+                        
+                        # Add age band info to report name for download
+                        if selected_age_band != 'All Data':
+                            report_key = f"{country}_Brand_ABC_{selected_age_band.replace(' ', '_')}"
+                        else:
+                            report_key = f"{country}_Brand_ABC"
                         all_reports[report_key] = brand_abc
                     
-                    # Report 3: SKU ABC
+                    # Report 3: SKU ABC (with age band filter)
                     st.markdown("#### Report 3: SKU ABC Classification")
-                    sku_abc = generate_sku_abc(df_with_values, country)
+                    sku_abc = generate_sku_abc(df_with_values, country, selected_age_band)
                     
                     if not sku_abc.empty:
                         display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
@@ -886,23 +962,30 @@ def main():
                             use_container_width=True
                         )
                         st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
-                        # Store in dictionary for download
-                        report_key = f"{country}_SKU_ABC"
+                        
+                        # Add age band info to report name for download
+                        if selected_age_band != 'All Data':
+                            report_key = f"{country}_SKU_ABC_{selected_age_band.replace(' ', '_')}"
+                        else:
+                            report_key = f"{country}_SKU_ABC"
                         all_reports[report_key] = sku_abc
             
-            # ===== Step 6: Download all results as Excel =====
+            # ===== Step 7: Download all results as Excel =====
             if all_reports:
                 st.markdown("---")
-                st.subheader("📥 Step 6: Download All Results")
+                st.subheader("📥 Step 7: Download All Results")
                 
                 col1, col2, col3 = st.columns([2,1,2])
                 with col2:
                     # Generate Excel file for download with percentage formatting
                     excel_file = create_excel_download(all_reports)
                     
-                    # Create download button
+                    # Create download button with age band info in filename
                     today = datetime.now()
-                    filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
+                    if selected_age_band != 'All Data':
+                        filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis {selected_age_band.replace(' ', '_')}.xlsx"
+                    else:
+                        filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
                     
                     st.download_button(
                         label="📥 Download Results",
@@ -913,7 +996,8 @@ def main():
                         use_container_width=True
                     )
                     
-                    st.success(f"✅ {len(all_reports)} reports ready for download")
+                    filter_info = f" with {selected_age_band} filter" if selected_age_band != 'All Data' else ""
+                    st.success(f"✅ {len(all_reports)} reports ready for download{filter_info}")
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")

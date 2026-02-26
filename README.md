@@ -125,6 +125,7 @@ cd inventory-abc-analyzer
 pip install -r requirements.txt
 ```
 
+
 ### 3. Share Google Sheet Permission
 
 1. Enable the Google Sheets API in Google Cloud Console  
@@ -137,4 +138,9 @@ pip install -r requirements.txt
 1. Login streamlit cloud
 2. Click "create app"
 3. Select the corresponding repository on GitHub
+
+
+### 5. Edit Secret on Streamlit Cloud
+1. App - Setting - Secrets
+
 
