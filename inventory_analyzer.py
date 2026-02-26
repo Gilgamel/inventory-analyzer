@@ -839,7 +839,7 @@ def main():
                                 'Inventory Value': '￥{:,.2f}',
                                 'Value %': '{:.2%}'  # Format as percentage
                             }),
-                            use_container_width=True
+                            use_container_width=False
                         )
                         # Store in dictionary for download
                         report_key = f"{country}_Age_Summary"
