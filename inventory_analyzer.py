@@ -378,7 +378,7 @@ def abc_classification(df, value_col, group_col=None):
     
     if group_col and group_col in df.columns:
         result_dfs = []
-        for group, group_df in df.groupby(group_col):
+        for group, group_df in df.groupby(group_col, dropna=False):
             if len(group_df) > 0:
                 # Sort by value descending
                 sorted_df = group_df.sort_values(value_col, ascending=False).copy()
@@ -556,7 +556,7 @@ def generate_brand_abc(df, country, age_band=None):
     # 根据 age_band 选择正确的数量列
     qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Inventory'
 
-    brand_summary = filtered_df.groupby('Brand').agg({
+    brand_summary = filtered_df.groupby('Brand', dropna=False).agg({
         'Total_Value': 'sum',
         'SKU': 'count',
         qty_col: 'sum'
