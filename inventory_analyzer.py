@@ -553,13 +553,16 @@ def generate_brand_abc(df, country, age_band=None):
     if len(filtered_df) == 0:
         return pd.DataFrame()
     
+    # 根据 age_band 选择正确的数量列
+    qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Inventory'
+
     brand_summary = filtered_df.groupby('Brand').agg({
         'Total_Value': 'sum',
         'SKU': 'count',
-        'Total_Inventory': 'sum'
+        qty_col: 'sum'
     }).rename(columns={
         'SKU': 'SKU Count',
-        'Total_Inventory': 'Inventory Qty'
+        qty_col: 'Inventory Qty'
     }).reset_index()
     
     brand_summary = brand_summary[brand_summary['Total_Value'] > 0]
@@ -607,8 +610,9 @@ def generate_sku_abc(df, country, age_band=None):
     if len(filtered_df) == 0:
         return pd.DataFrame()
     
-    # Prepare SKU-level data
-    sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Inventory']
+    # 根据 age_band 选择正确的数量列
+    qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Inventory'
+    sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', qty_col]
     available_cols = [col for col in sku_cols if col in filtered_df.columns]
     
     if not available_cols:
@@ -636,7 +640,7 @@ def generate_sku_abc(df, country, age_band=None):
         'SKU': 'SKU',
         'Product_Name': 'Product Name',
         'Total_Value': 'Inventory Value',
-        'Total_Inventory': 'Inventory Qty',
+        qty_col: 'Inventory Qty',
         'value_pct': 'Value %',
         'cum_pct': 'Cumulative %',
         'abc_class': 'SKU Class'
