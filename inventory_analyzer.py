@@ -660,37 +660,7 @@ def generate_sku_abc(df, country, age_band=None):
     
     return sku_abc
 
-# ========== 13. Generate reports for all age bands ==========
-def generate_all_age_band_reports(df, country):
-    """
-    Generate reports for all age bands and combine them into a single dictionary
-    """
-    all_reports = {}
-    
-    # Age Summary (always included, not age-band specific)
-    age_summary = generate_age_summary(df, country)
-    if not age_summary.empty:
-        all_reports[f"{country}_Age_Summary"] = age_summary
-    
-    # Generate reports for each age band
-    for band in AGE_BANDS:
-        band_name = band['name']
-        
-        # Brand ABC for this age band
-        brand_abc = generate_brand_abc(df, country, band_name)
-        if not brand_abc.empty:
-            report_key = f"{country}_Brand_ABC_{band_name.replace(' ', '_')}"
-            all_reports[report_key] = brand_abc
-        
-        # SKU ABC for this age band
-        sku_abc = generate_sku_abc(df, country, band_name)
-        if not sku_abc.empty:
-            report_key = f"{country}_SKU_ABC_{band_name.replace(' ', '_')}"
-            all_reports[report_key] = sku_abc
-    
-    return all_reports
-
-# ========== 14. Function to create Excel download with percentage formatting ==========
+# ========== 13. Function to create Excel download with percentage formatting ==========
 def create_excel_download(all_reports):
     """
     Create an Excel file with multiple sheets from all reports
@@ -744,7 +714,7 @@ def create_excel_download(all_reports):
     output.seek(0)
     return output
 
-# ========== 15. Function to demonstrate ABC classification logic ==========
+# ========== 14. Function to demonstrate ABC classification logic ==========
 def demonstrate_abc_logic():
     """
     Demonstrate the modified ABC classification logic
@@ -779,7 +749,7 @@ def demonstrate_abc_logic():
     - Item6 (2%): cumulative 100% → C class
     """)
 
-# ========== 16. Main program ==========
+# ========== 15. Main program ==========
 def main():
     st.sidebar.header("⚙️ Analyzer Information")
     
@@ -809,7 +779,7 @@ def main():
            - Items crossing thresholds included in previous class
         
         6. **Download results**
-           - Choose to download current age band or all age bands
+           - One-click download all reports as Excel
            - Value % and Cumulative % displayed as percentages
         """)
         
@@ -871,16 +841,16 @@ def main():
             # Create age band options
             age_band_options = ['All Data'] + [band['name'] for band in AGE_BANDS]
             selected_age_band = st.selectbox(
-                "Select Age Band for display (optional):",
+                "Select Age Band (optional):",
                 options=age_band_options,
                 index=0,
-                help="Select a specific age band to analyze only that inventory. 'All Data' includes all age bands. This affects what you see on screen."
+                help="Select a specific age band to analyze only that inventory. 'All Data' includes all age bands."
             )
             
             if selected_age_band != 'All Data':
                 # Show filter information
                 filtered_count = len(filter_by_age_band(df_with_values, selected_age_band))
-                st.info(f"Filtering display to show only SKUs with {selected_age_band} inventory. Found {filtered_count} SKUs with this age band.")
+                st.info(f"Filtering to show only SKUs with {selected_age_band} inventory. Found {filtered_count} SKUs with this age band.")
             
             # ===== Step 6: Analysis by country =====
             st.subheader("📊 Step 6: Generate Analysis Reports")
@@ -899,7 +869,7 @@ def main():
             
             st.success(f"Found {len(countries)} countries: {', '.join(countries)}")
             
-            # Dictionary to store all reports for download (will be populated based on download option)
+            # Dictionary to store all reports for download
             all_reports = {}
             
             # Create tabs for each country
@@ -943,20 +913,21 @@ def main():
                             }),
                             use_container_width=False
                         )
-                        # Store in dictionary for download (will be overwritten if multiple countries, but that's handled by report keys)
-                        # We'll populate all_reports later based on download option
+                        # Store in dictionary for download
+                        report_key = f"{country}_Age_Summary"
+                        all_reports[report_key] = age_summary
                     
-                    # Report 2: Brand ABC (with age band filter for display)
+                    # Report 2: Brand ABC (with age band filter)
                     st.markdown("#### Report 2: Brand ABC Classification")
-                    brand_abc_display = generate_brand_abc(df_with_values, country, selected_age_band)
+                    brand_abc = generate_brand_abc(df_with_values, country, selected_age_band)
                     
-                    if not brand_abc_display.empty:
+                    if not brand_abc.empty:
                         # Define column order for display
                         column_order = ['Brand', 'SKU Count', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'Brand Class']
-                        display_columns = [col for col in column_order if col in brand_abc_display.columns]
+                        display_columns = [col for col in column_order if col in brand_abc.columns]
                         
                         st.dataframe(
-                            brand_abc_display[display_columns].style.format({
+                            brand_abc[display_columns].style.format({
                                 'Inventory Qty': '{:,.0f}',
                                 'Inventory Value': '￥{:,.2f}',
                                 'SKU Count': '{:,.0f}',
@@ -965,17 +936,24 @@ def main():
                             }),
                             use_container_width=True
                         )
+                        
+                        # Add age band info to report name for download
+                        if selected_age_band != 'All Data':
+                            report_key = f"{country}_Brand_ABC_{selected_age_band.replace(' ', '_')}"
+                        else:
+                            report_key = f"{country}_Brand_ABC"
+                        all_reports[report_key] = brand_abc
                     
-                    # Report 3: SKU ABC (with age band filter for display)
+                    # Report 3: SKU ABC (with age band filter)
                     st.markdown("#### Report 3: SKU ABC Classification")
-                    sku_abc_display = generate_sku_abc(df_with_values, country, selected_age_band)
+                    sku_abc = generate_sku_abc(df_with_values, country, selected_age_band)
                     
-                    if not sku_abc_display.empty:
+                    if not sku_abc.empty:
                         display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
-                        available_cols = [col for col in display_cols if col in sku_abc_display.columns]
+                        available_cols = [col for col in display_cols if col in sku_abc.columns]
                         
                         st.dataframe(
-                            sku_abc_display[available_cols].head(100).style.format({
+                            sku_abc[available_cols].head(100).style.format({
                                 'Inventory Qty': '{:,.0f}',
                                 'Inventory Value': '￥{:,.2f}',
                                 'Value %': '{:.2%}',
@@ -983,95 +961,43 @@ def main():
                             }),
                             use_container_width=True
                         )
-                        st.caption(f"Showing first 100 rows, total {len(sku_abc_display)} rows")
+                        st.caption(f"Showing first 100 rows, total {len(sku_abc)} rows")
+                        
+                        # Add age band info to report name for download
+                        if selected_age_band != 'All Data':
+                            report_key = f"{country}_SKU_ABC_{selected_age_band.replace(' ', '_')}"
+                        else:
+                            report_key = f"{country}_SKU_ABC"
+                        all_reports[report_key] = sku_abc
             
-            # ===== Step 7: Download options =====
-            if countries:
+            # ===== Step 7: Download all results as Excel =====
+            if all_reports:
                 st.markdown("---")
-                st.subheader("📥 Step 7: Download Results")
+                st.subheader("📥 Step 7: Download All Results")
                 
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Download current age band only
-                    if st.button("📥 Download Current Age Band Only", type="secondary", use_container_width=True):
-                        with st.spinner(f"Preparing download for {selected_age_band}..."):
-                            # Clear previous reports
-                            current_reports = {}
-                            
-                            # Add Age Summary for all countries
-                            for country in countries:
-                                age_summary = generate_age_summary(df_with_values, country)
-                                if not age_summary.empty:
-                                    current_reports[f"{country}_Age_Summary"] = age_summary
-                                
-                                # Add Brand ABC for current age band
-                                brand_abc = generate_brand_abc(df_with_values, country, selected_age_band)
-                                if not brand_abc.empty:
-                                    if selected_age_band != 'All Data':
-                                        report_key = f"{country}_Brand_ABC_{selected_age_band.replace(' ', '_')}"
-                                    else:
-                                        report_key = f"{country}_Brand_ABC"
-                                    current_reports[report_key] = brand_abc
-                                
-                                # Add SKU ABC for current age band
-                                sku_abc = generate_sku_abc(df_with_values, country, selected_age_band)
-                                if not sku_abc.empty:
-                                    if selected_age_band != 'All Data':
-                                        report_key = f"{country}_SKU_ABC_{selected_age_band.replace(' ', '_')}"
-                                    else:
-                                        report_key = f"{country}_SKU_ABC"
-                                    current_reports[report_key] = sku_abc
-                            
-                            if current_reports:
-                                excel_file = create_excel_download(current_reports)
-                                today = datetime.now()
-                                if selected_age_band != 'All Data':
-                                    filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis {selected_age_band.replace(' ', '_')}.xlsx"
-                                else:
-                                    filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
-                                
-                                st.download_button(
-                                    label="📥 Click to Download",
-                                    data=excel_file,
-                                    file_name=filename,
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="download_current",
-                                    use_container_width=True
-                                )
-                                filter_info = f" with {selected_age_band} filter" if selected_age_band != 'All Data' else ""
-                                st.success(f"✅ {len(current_reports)} reports ready for download{filter_info}")
-                            else:
-                                st.error("No data available for download")
-                
+                col1, col2, col3 = st.columns([2,1,2])
                 with col2:
-                    # Download all age bands
-                    if st.button("📥 Download ALL Age Bands", type="primary", use_container_width=True):
-                        with st.spinner("Preparing comprehensive report with all age bands..."):
-                            # Clear previous reports
-                            all_age_reports = {}
-                            
-                            for country in countries:
-                                # Generate all reports for this country
-                                country_reports = generate_all_age_band_reports(df_with_values, country)
-                                all_age_reports.update(country_reports)
-                            
-                            if all_age_reports:
-                                excel_file = create_excel_download(all_age_reports)
-                                today = datetime.now()
-                                filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis ALL_AGE_BANDS.xlsx"
-                                
-                                st.download_button(
-                                    label="📥 Click to Download",
-                                    data=excel_file,
-                                    file_name=filename,
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="download_all",
-                                    use_container_width=True
-                                )
-                                st.success(f"✅ {len(all_age_reports)} reports ready for download (all age bands included)")
-                            else:
-                                st.error("No data available for download")
+                    # Generate Excel file for download with percentage formatting
+                    excel_file = create_excel_download(all_reports)
+                    
+                    # Create download button with age band info in filename
+                    today = datetime.now()
+                    if selected_age_band != 'All Data':
+                        filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis {selected_age_band.replace(' ', '_')}.xlsx"
+                    else:
+                        filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
+                    
+                    st.download_button(
+                        label="📥 Download Results",
+                        data=excel_file,
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    
+                    filter_info = f" with {selected_age_band} filter" if selected_age_band != 'All Data' else ""
+                    st.success(f"✅ {len(all_reports)} reports ready for download{filter_info}")
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
