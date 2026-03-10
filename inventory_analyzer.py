@@ -328,13 +328,20 @@ def calculate_age_band_values(df):
         else:
             result[f'{band_name}_Qty'] = 0
     
-    # Calculate total inventory value
+    # Calculate total inventory value and quantity from all age bands
     value_cols = [f"{band['name']}_Value" for band in AGE_BANDS if f"{band['name']}_Value" in result.columns]
     if value_cols:
         result['Total_Value'] = result[value_cols].sum(axis=1)
     else:
         result['Total_Value'] = 0
-    
+
+    # Calculate total quantity from all age bands (for consistent reporting)
+    qty_cols = [f"{band['name']}_Qty" for band in AGE_BANDS if f"{band['name']}_Qty" in result.columns]
+    if qty_cols:
+        result['Total_Band_Qty'] = result[qty_cols].sum(axis=1)
+    else:
+        result['Total_Band_Qty'] = 0
+
     return result
 
 # ========== 8. Filter data by age band ==========
@@ -554,7 +561,8 @@ def generate_brand_abc(df, country, age_band=None):
         return pd.DataFrame()
     
     # 根据 age_band 选择正确的数量列
-    qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Inventory'
+    # 使用 Total_Band_Qty (所有波段Qty总和) 以确保与 Age Summary 一致
+    qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Band_Qty'
 
     brand_summary = filtered_df.groupby('Brand', dropna=False).agg({
         'Total_Value': 'sum',
@@ -611,7 +619,8 @@ def generate_sku_abc(df, country, age_band=None):
         return pd.DataFrame()
     
     # 根据 age_band 选择正确的数量列
-    qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Inventory'
+    # 使用 Total_Band_Qty (所有波段Qty总和) 以确保与 Age Summary 一致
+    qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Band_Qty'
     sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', qty_col]
     available_cols = [col for col in sku_cols if col in filtered_df.columns]
     
