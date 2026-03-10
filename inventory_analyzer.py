@@ -574,7 +574,9 @@ def generate_brand_abc(df, country, age_band=None):
     }).reset_index()
     
     # 过滤掉 Total_Value 和 Total_Band_Qty 都为 0 的品牌（既没数量也没金额）
-    brand_summary = brand_summary[~((brand_summary['Total_Value'] == 0) & (brand_summary['Total_Band_Qty'] == 0))]
+    # 过滤掉 Total_Value 和对应的数量列都为 0 的品牌（既没数量也没金额）
+    # 使用 qty_col 来确定要检查的数量列
+    brand_summary = brand_summary[~((brand_summary['Total_Value'] == 0) & (brand_summary[qty_col] == 0))]
     
     if len(brand_summary) == 0:
         return pd.DataFrame()
@@ -622,15 +624,16 @@ def generate_sku_abc(df, country, age_band=None):
     # 根据 age_band 选择正确的数量列
     # 使用 Total_Band_Qty (所有波段Qty总和) 以确保与 Age Summary 一致
     qty_col = f'{age_band}_Qty' if age_band and age_band != 'All Data' else 'Total_Band_Qty'
-    sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', 'Total_Band_Qty', qty_col]
+    sku_cols = ['Brand', 'SKU', 'Product_Name', 'Total_Value', qty_col]
     available_cols = [col for col in sku_cols if col in filtered_df.columns]
 
     if not available_cols:
         return pd.DataFrame()
 
     sku_data = filtered_df[available_cols].copy()
-    # 过滤掉 Total_Value 和 Total_Band_Qty 都为 0 的 SKU（既没数量也没金额）
-    sku_data = sku_data[~((sku_data['Total_Value'] == 0) & (sku_data['Total_Band_Qty'] == 0))]
+    # 过滤掉 Total_Value 和对应的数量列都为 0 的 SKU（既没数量也没金额）
+    # 使用 qty_col 来确定要检查的数量列
+    sku_data = sku_data[~((sku_data['Total_Value'] == 0) & (sku_data[qty_col] == 0))]
     
     if len(sku_data) == 0:
         return pd.DataFrame()
