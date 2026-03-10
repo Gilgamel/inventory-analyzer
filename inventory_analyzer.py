@@ -572,11 +572,9 @@ def generate_brand_abc(df, country, age_band=None):
         'SKU': 'SKU Count',
         qty_col: 'Inventory Qty'
     }).reset_index()
-    
-    # 过滤掉 Total_Value 和 Total_Band_Qty 都为 0 的品牌（既没数量也没金额）
-    # 过滤掉 Total_Value 和对应的数量列都为 0 的品牌（既没数量也没金额）
-    # 使用 qty_col 来确定要检查的数量列
-    brand_summary = brand_summary[~((brand_summary['Total_Value'] == 0) & (brand_summary[qty_col] == 0))]
+
+    # 过滤掉 Total_Value 和 Inventory Qty 都为 0 的品牌（既没数量也没金额）
+    brand_summary = brand_summary[~((brand_summary['Total_Value'] == 0) & (brand_summary['Inventory Qty'] == 0))]
     
     if len(brand_summary) == 0:
         return pd.DataFrame()
