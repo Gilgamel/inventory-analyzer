@@ -986,34 +986,95 @@ def main():
                             report_key = f"{country}_SKU_ABC"
                         all_reports[report_key] = sku_abc
             
-            # ===== Step 7: Download all results as Excel =====
-            if all_reports:
+            # ===== Step 7: Generate all reports for download =====
+            # Generate complete set of reports for all age bands
+            all_download_reports = {}
+
+            for country in countries:
+                # Age Summary (always included)
+                age_summary = generate_age_summary(df_with_values, country)
+                if not age_summary.empty:
+                    all_download_reports[f"Age Summary - {country}"] = age_summary
+
+                # Generate Brand ABC and SKU ABC for All Data
+                brand_abc_all = generate_brand_abc(df_with_values, country, 'All Data')
+                if not brand_abc_all.empty:
+                    all_download_reports[f"Brand ABC (All Data) - {country}"] = brand_abc_all
+
+                sku_abc_all = generate_sku_abc(df_with_values, country, 'All Data')
+                if not sku_abc_all.empty:
+                    all_download_reports[f"SKU ABC (All Data) - {country}"] = sku_abc_all
+
+                # Generate Brand ABC and SKU ABC for each age band
+                for band in AGE_BANDS:
+                    band_name = band['name']
+                    brand_abc_band = generate_brand_abc(df_with_values, country, band_name)
+                    if not brand_abc_band.empty:
+                        all_download_reports[f"Brand ABC ({band_name}) - {country}"] = brand_abc_band
+
+                    sku_abc_band = generate_sku_abc(df_with_values, country, band_name)
+                    if not sku_abc_band.empty:
+                        all_download_reports[f"SKU ABC ({band_name}) - {country}"] = sku_abc_band
+
+            # ===== Step 8: Download section with options =====
+            if all_download_reports:
                 st.markdown("---")
-                st.subheader("📥 Step 7: Download All Results")
-                
-                col1, col2, col3 = st.columns([2,1,2])
-                with col2:
-                    # Generate Excel file for download with percentage formatting
-                    excel_file = create_excel_download(all_reports)
-                    
-                    # Create download button with age band info in filename
-                    today = datetime.now()
-                    if selected_age_band != 'All Data':
-                        filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis {selected_age_band.replace(' ', '_')}.xlsx"
-                    else:
-                        filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
-                    
-                    st.download_button(
-                        label="📥 Download Results",
-                        data=excel_file,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        type="primary",
-                        use_container_width=True
-                    )
-                    
-                    filter_info = f" with {selected_age_band} filter" if selected_age_band != 'All Data' else ""
-                    st.success(f"✅ {len(all_reports)} reports ready for download{filter_info}")
+                st.subheader("📥 Step 8: Download Reports")
+
+                # Create options for download
+                download_options = []
+
+                # Add Age Summary options
+                for country in countries:
+                    download_options.append(f"Age Summary - {country}")
+
+                # Add Brand/SKU ABC (All Data) options
+                for country in countries:
+                    download_options.append(f"Brand ABC (All Data) - {country}")
+                    download_options.append(f"SKU ABC (All Data) - {country}")
+
+                # Add Brand/SKU ABC per age band options
+                for band in AGE_BANDS:
+                    band_name = band['name']
+                    for country in countries:
+                        download_options.append(f"Brand ABC ({band_name}) - {country}")
+                        download_options.append(f"SKU ABC ({band_name}) - {country}")
+
+                # Multi-select for reports to download
+                selected_reports = st.multiselect(
+                    "Select reports to download:",
+                    options=download_options,
+                    default=download_options,
+                    help="Choose which reports to include in the Excel download"
+                )
+
+                if selected_reports:
+                    # Filter reports based on selection
+                    filtered_reports = {}
+                    for report_name in selected_reports:
+                        if report_name in all_download_reports:
+                            filtered_reports[report_name] = all_download_reports[report_name]
+
+                    if filtered_reports:
+                        col1, col2, col3 = st.columns([2,1,2])
+                        with col2:
+                            # Generate Excel file for download
+                            excel_file = create_excel_download(filtered_reports)
+
+                            # Create download button
+                            today = datetime.now()
+                            filename = f"{today.strftime('%Y-%m-%d')} Inventory Analysis.xlsx"
+
+                            st.download_button(
+                                label=f"📥 Download {len(filtered_reports)} Selected Reports",
+                                data=excel_file,
+                                file_name=filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                type="primary",
+                                use_container_width=True
+                            )
+
+                            st.success(f"✅ {len(filtered_reports)} reports ready for download")
             
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
