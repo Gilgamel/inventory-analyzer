@@ -909,7 +909,7 @@ def main():
                 st.stop()
             
             countries = df_with_values['Country'].unique()
-            countries = [c for c in countries if pd.notna(c)]  # Filter NaN
+            countries = [c for c in countries if pd.notna(c) and c != '']  # Filter NaN and empty string
             
             if len(countries) == 0:
                 st.error("No valid country data")
@@ -921,7 +921,25 @@ def main():
             all_reports = {}
             
             # Create tabs for each country
-            tabs = st.tabs([f"{c}" if c == 'US' else f"{c}" if c == 'CA' else f"{c}" if c == 'CN' else f"VTM 北美仓" for c in countries])
+            # 为每个国家创建 tab，显示名称更友好
+            tab_names = []
+            for c in countries:
+                if pd.isna(c) or c == '' or c is None:
+                    tab_names.append('Unknown')
+                elif c == 'US':
+                    tab_names.append('US')
+                elif c == 'CA':
+                    tab_names.append('CA')
+                elif c == 'CN':
+                    tab_names.append('CN')
+                elif c == 'US Local':
+                    tab_names.append('US Local')
+                elif c == 'CA Local':
+                    tab_names.append('CA Local')
+                else:
+                    tab_names.append(str(c))
+
+            tabs = st.tabs(tab_names)
             
             for tab, country in zip(tabs, countries):
                 with tab:
