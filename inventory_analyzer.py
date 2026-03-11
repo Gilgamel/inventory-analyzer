@@ -1068,32 +1068,83 @@ def main():
                 st.markdown("---")
                 st.subheader("📥 Step 8: Download Reports")
 
-                # Create options for download
-                download_options = []
+                # Country and Age Band multi-selectors
+                col_filter1, col_filter2 = st.columns(2)
+
+                # Countries to exclude by default
+                exclude_countries = ["US Local", "CA Local"]
+
+                with col_filter1:
+                    # Country multi-selector (no "All" option - select all by default)
+                    # Default: select all countries except US Local and CA Local
+                    selected_countries = st.multiselect(
+                        "Select Country:",
+                        options=countries,
+                        default=[c for c in countries if c not in exclude_countries],
+                        help="Select one or more countries (default excludes US Local and CA Local)"
+                    )
+
+                with col_filter2:
+                    # Age Band multi-selector (no "All Data" option - select all by default)
+                    age_band_names = [band['name'] for band in AGE_BANDS]
+
+                    selected_age_bands = st.multiselect(
+                        "Select Age Band:",
+                        options=age_band_names,
+                        default=age_band_names,
+                        help="Select one or more age bands"
+                    )
+
+                # Build filtered options based on selection
+                filtered_options = []
+
+                # Helper function to check if country should be included
+                def should_include_country(country):
+                    if not selected_countries:
+                        # If nothing selected, include all except excluded
+                        return country not in exclude_countries
+                    return country in selected_countries
+
+                # Helper function to check if age band should be included
+                def should_include_age_band(age_band):
+                    if not selected_age_bands:
+                        return True
+                    return age_band in selected_age_bands
 
                 # Add Age Summary options
                 for country in countries:
-                    download_options.append(f"Age Summary - {country}")
+                    if should_include_country(country):
+                        if not selected_age_bands or len(selected_age_bands) == len(age_band_names):
+                            filtered_options.append(f"Age Summary - {country}")
 
-                # Add Brand/SKU ABC (All Data) options
+                # Add Brand/SKU ABC (All Data) options (only if all age bands are selected or none selected)
+                all_age_bands_selected = len(selected_age_bands) == len(age_band_names) or not selected_age_bands
+
                 for country in countries:
-                    download_options.append(f"Brand ABC (All Data) - {country}")
-                    download_options.append(f"SKU ABC (All Data) - {country}")
+                    if should_include_country(country):
+                        if all_age_bands_selected:
+                            filtered_options.append(f"Brand ABC (All Data) - {country}")
+                            filtered_options.append(f"SKU ABC (All Data) - {country}")
 
                 # Add Brand/SKU ABC per age band options
                 for band in AGE_BANDS:
                     band_name = band['name']
-                    for country in countries:
-                        download_options.append(f"Brand ABC ({band_name}) - {country}")
-                        download_options.append(f"SKU ABC ({band_name}) - {country}")
+                    if should_include_age_band(band_name):
+                        for country in countries:
+                            if should_include_country(country):
+                                filtered_options.append(f"Brand ABC ({band_name}) - {country}")
+                                filtered_options.append(f"SKU ABC ({band_name}) - {country}")
 
-                # Multi-select for reports to download
+                # Multi-select for reports to download (pre-selected based on filters)
                 selected_reports = st.multiselect(
                     "Select reports to download:",
-                    options=download_options,
-                    default=download_options,
+                    options=filtered_options,
+                    default=filtered_options,
                     help="Choose which reports to include in the Excel download"
                 )
+
+                # Add hint about default selection
+                st.caption("💡 Default: Downloads all data except US Local and CA Local")
 
                 if selected_reports:
                     # Filter reports based on selection
