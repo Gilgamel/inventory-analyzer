@@ -632,9 +632,23 @@ def generate_sku_abc(df, country, age_band=None):
     # 过滤掉 Total_Value 和对应的数量列都为 0 的 SKU（既没数量也没金额）
     # 使用 qty_col 来确定要检查的数量列
     sku_data = sku_data[~((sku_data['Total_Value'] == 0) & (sku_data[qty_col] == 0))]
-    
+
     if len(sku_data) == 0:
         return pd.DataFrame()
+
+    # 按 Brand + SKU 合并数据（汇总所有仓库的同一 SKU）
+    # 检查 Brand 列是否存在
+    if 'Brand' not in sku_data.columns or 'SKU' not in sku_data.columns:
+        return pd.DataFrame()
+
+    groupby_cols = ['Brand', 'SKU']
+    if 'Product_Name' in sku_data.columns:
+        groupby_cols.append('Product_Name')
+
+    sku_data = sku_data.groupby(groupby_cols, dropna=False).agg({
+        'Total_Value': 'sum',
+        qty_col: 'sum'
+    }).reset_index()
     
     # Get brand classification (using the same age band for consistency)
     brand_abc = generate_brand_abc(df, country, age_band)
@@ -647,16 +661,24 @@ def generate_sku_abc(df, country, age_band=None):
     # Use modified ABC classification function for SKU-level classification
     sku_abc = abc_classification(sku_data, 'Total_Value', group_col='Brand')
     
-    sku_abc = sku_abc.rename(columns={
+    # 重命名列（groupby 后 qty_col 变成了聚合后的列名）
+    rename_dict = {
         'Brand': 'Brand',
         'SKU': 'SKU',
-        'Product_Name': 'Product Name',
         'Total_Value': 'Inventory Value',
-        qty_col: 'Inventory Qty',
         'value_pct': 'Value %',
         'cum_pct': 'Cumulative %',
         'abc_class': 'SKU Class'
-    })
+    }
+    # 检查 qty_col 是否在列中，如果不在尝试其他可能的列名
+    if qty_col in sku_abc.columns:
+        rename_dict[qty_col] = 'Inventory Qty'
+    elif 'Total_Band_Qty' in sku_abc.columns:
+        rename_dict['Total_Band_Qty'] = 'Inventory Qty'
+    if 'Product_Name' in sku_abc.columns:
+        rename_dict['Product_Name'] = 'Product Name'
+
+    sku_abc = sku_abc.rename(columns=rename_dict)
     
     # Define custom sort order for Brand Class
     brand_class_order = {'A': 0, 'B': 1, 'C': 2, 'Unclassified': 3}
