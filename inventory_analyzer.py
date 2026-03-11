@@ -910,6 +910,22 @@ def main():
             
             countries = df_with_values['Country'].unique()
             countries = [c for c in countries if pd.notna(c)]  # Filter NaN only, keep empty string
+
+            # Sort countries: US, US Local, CA, CA Local, CN, then others (empty string = VTM 北美仓)
+            def sort_key(c):
+                if c == 'US':
+                    return (0, '')
+                elif c == 'US Local':
+                    return (1, '')
+                elif c == 'CA':
+                    return (2, '')
+                elif c == 'CA Local':
+                    return (3, '')
+                elif c == 'CN':
+                    return (4, '')
+                else:
+                    return (5, str(c))
+            countries = sorted(countries, key=sort_key)
             
             if len(countries) == 0:
                 st.error("No valid country data")
