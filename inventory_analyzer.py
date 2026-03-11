@@ -909,7 +909,7 @@ def main():
                 st.stop()
             
             countries = df_with_values['Country'].unique()
-            countries = [c for c in countries if pd.notna(c) and c != '']  # Filter NaN and empty string
+            countries = [c for c in countries if pd.notna(c)]  # Filter NaN only, keep empty string
             
             if len(countries) == 0:
                 st.error("No valid country data")
