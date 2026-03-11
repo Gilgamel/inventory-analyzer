@@ -920,25 +920,7 @@ def main():
             # Dictionary to store all reports for download
             all_reports = {}
             
-            # Create tabs for each country
-            # 为每个国家创建 tab，显示名称更友好
-            # 如果不是 US/CA/CN/US Local/CA Local，则显示为 VTM 北美仓
-            tab_names = []
-            for c in countries:
-                if c == 'US':
-                    tab_names.append('US')
-                elif c == 'CA':
-                    tab_names.append('CA')
-                elif c == 'CN':
-                    tab_names.append('CN')
-                elif c == 'US Local':
-                    tab_names.append('US Local')
-                elif c == 'CA Local':
-                    tab_names.append('CA Local')
-                else:
-                    tab_names.append('VTM 北美仓')
-
-            tabs = st.tabs(tab_names)
+            tabs = st.tabs([f"{c}" if c in ['US', 'CA', 'CN', 'US Local', 'CA Local'] else f"VTM 北美仓" for c in countries])
             
             for tab, country in zip(tabs, countries):
                 with tab:
