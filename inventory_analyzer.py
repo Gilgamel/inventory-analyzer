@@ -1144,7 +1144,7 @@ def main():
                 )
 
                 # Add hint about default selection
-                st.caption("💡 Default: Downloads all data except US Local and CA Local")
+                st.caption("💡 By default, all data is downloaded except US Local and CA Local.")
 
                 if selected_reports:
                     # Filter reports based on selection
