@@ -922,11 +922,10 @@ def main():
             
             # Create tabs for each country
             # 为每个国家创建 tab，显示名称更友好
+            # 如果不是 US/CA/CN/US Local/CA Local，则显示为 VTM 北美仓
             tab_names = []
             for c in countries:
-                if pd.isna(c) or c == '' or c is None:
-                    tab_names.append('VTM 北美仓')
-                elif c == 'US':
+                if c == 'US':
                     tab_names.append('US')
                 elif c == 'CA':
                     tab_names.append('CA')
@@ -937,7 +936,7 @@ def main():
                 elif c == 'CA Local':
                     tab_names.append('CA Local')
                 else:
-                    tab_names.append(str(c))
+                    tab_names.append('VTM 北美仓')
 
             tabs = st.tabs(tab_names)
             
