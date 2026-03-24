@@ -933,7 +933,16 @@ def main():
                 # Show filter information
                 filtered_count = len(filter_by_age_band(df_with_values, selected_age_band))
                 st.info(f"Filtering to show only SKUs with {selected_age_band} inventory. Found {filtered_count} SKUs with this age band.")
-            
+
+            # Owner multi-select filter
+            owner_options = sorted(df_with_values['Owner'].unique().tolist())
+            selected_owners = st.multiselect(
+                "Filter by Owner:",
+                options=owner_options,
+                default=owner_options,
+                help="Select one or more owners to filter the data. All owners selected by default."
+            )
+
             # ===== Step 6: Analysis by country =====
             st.subheader("📊 Step 6: Generate Analysis Reports")
             
@@ -974,15 +983,21 @@ def main():
             
             for tab, country in zip(tabs, countries):
                 with tab:
-                    # Get country data
+                    # Get country data and apply owner filter
                     country_data = df_with_values[df_with_values['Country'] == country]
-                    
+                    if selected_owners:
+                        country_data = country_data[country_data['Owner'].isin(selected_owners)]
+
                     # Apply age band filter for display info
+                    filter_desc = ""
+                    if selected_owners and set(selected_owners) != set(owner_options):
+                        filter_desc += f" owner={','.join(selected_owners)}"
                     if selected_age_band != 'All Data':
                         filtered_country_data = filter_by_age_band(country_data, selected_age_band)
-                        st.markdown(f"### {country} Inventory Analysis ({len(filtered_country_data)} records after {selected_age_band} filter)")
+                        filter_desc += f" {selected_age_band}"
+                        st.markdown(f"### {country} Inventory Analysis ({len(filtered_country_data)} records{filter_desc})")
                     else:
-                        st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records)")
+                        st.markdown(f"### {country} Inventory Analysis ({len(country_data)} records{filter_desc})")
                     
                     st.markdown(f"**Inventory value is calculated in RMB**")
                     
