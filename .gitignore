@@ -4,5 +4,6 @@ __pycache__/
 .DS_Store
 .env
 *.json
+!maxpower_owner_mapping.json
 test data/
 CLAUDE.md

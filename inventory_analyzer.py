@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
+import json
 from io import BytesIO
 from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle
@@ -66,11 +67,38 @@ AGE_BANDS = [
      'cost_cols': ['Age_91_180_Cost']},
     {'name': '181-365 days', 'qty_cols': ['Age_181_270_Qty', 'Age_271_330_Qty', 'Age_331_365_Qty'], 
      'cost_cols': ['Age_181_270_Cost', 'Age_271_330_Cost', 'Age_331_365_Cost']},
-    {'name': '365+ days', 'qty_cols': ['Age_365_Plus_Qty'], 
+    {'name': '365+ days', 'qty_cols': ['Age_365_Plus_Qty'],
      'cost_cols': ['Age_365_Plus_Cost']}
 ]
 
-# ========== 3. Google Sheets connection function ==========
+# ========== 3. MAXPOWER SKU Owner Mapping ==========
+with open('maxpower_owner_mapping.json', 'r', encoding='utf-8') as f:
+    MAXPOWER_SKU_MAPPING = json.load(f)  # lowercase sku -> owner
+
+def assign_owner(df):
+    """
+    Assign owner based on brand and SKU:
+    - brand = 'MAXPOWER' and SKU found in mapping -> VTM (from JSON)
+    - brand = 'MAXPOWER' and SKU not found -> VTC
+    - brand != 'MAXPOWER' (including empty/NaN) -> VTM
+    """
+    def get_owner(row):
+        brand = str(row.get('Brand', '')).strip()
+        sku = str(row.get('SKU', '')).strip().lower()
+
+        if brand == 'MAXPOWER':
+            if sku in MAXPOWER_SKU_MAPPING:
+                return MAXPOWER_SKU_MAPPING[sku]
+            else:
+                return 'VTC'
+        else:
+            return 'VTM'
+
+    df = df.copy()
+    df['Owner'] = df.apply(get_owner, axis=1)
+    return df
+
+# ========== 4. Google Sheets connection function ==========
 @st.cache_resource
 def connect_to_gsheet():
     """
@@ -882,8 +910,14 @@ def main():
             # ===== Step 4: Calculate age band values =====
             st.subheader("💰 Step 4: Calculate Inventory Value")
             df_with_values = calculate_age_band_values(df_processed)
-            
-            # ===== Step 5: Age Band Selection =====
+
+            # ===== Step 4.5: Assign Owner =====
+            st.subheader("👤 Step 5: Assign Owner")
+            df_with_values = assign_owner(df_with_values)
+            owner_counts = df_with_values['Owner'].value_counts()
+            st.info(f"Owner distribution: {dict(owner_counts)}")
+
+            # ===== Step 6: Age Band Selection =====
             st.subheader("📅 Step 5: Select Age Band for Analysis")
             
             # Create age band options
