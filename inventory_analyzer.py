@@ -100,71 +100,57 @@ def assign_owner(df):
 
 # ========== 4. Google Sheets connection function ==========
 @st.cache_resource
-def connect_to_gsheet():
+def connect_to_gsheet(retries=3, delay=2):
     """
-    Connect to Google Sheets
+    Connect to Google Sheets with retry logic
     """
-    try:
-        credentials_dict = {
-            "type": st.secrets["gcp"]["type"],
-            "project_id": st.secrets["gcp"]["project_id"],
-            "private_key_id": st.secrets["gcp"]["private_key_id"],
-            "private_key": st.secrets["gcp"]["private_key"],
-            "client_email": st.secrets["gcp"]["client_email"],
-            "client_id": st.secrets["gcp"]["client_id"],
-            "auth_uri": st.secrets["gcp"]["auth_uri"],
-            "token_uri": st.secrets["gcp"]["token_uri"]
-        }
-        
-        scope = ['https://spreadsheets.google.com/feeds',
-                 'https://www.googleapis.com/auth/drive',
-                 'https://www.googleapis.com/auth/spreadsheets']
-        credentials = Credentials.from_service_account_info(
-            credentials_dict, scopes=scope)
-        client = gspread.authorize(credentials)
-        
-        return client
-    except Exception as e:
-        st.error(f"Failed to connect to Google Sheets: {str(e)}")
-        return None
+    credentials_dict = {
+        "type": st.secrets["gcp"]["type"],
+        "project_id": st.secrets["gcp"]["project_id"],
+        "private_key_id": st.secrets["gcp"]["private_key_id"],
+        "private_key": st.secrets["gcp"]["private_key"],
+        "client_email": st.secrets["gcp"]["client_email"],
+        "client_id": st.secrets["gcp"]["client_id"],
+        "auth_uri": st.secrets["gcp"]["auth_uri"],
+        "token_uri": st.secrets["gcp"]["token_uri"]
+    }
 
-# ========== 4. Load static Warehouse Region mapping table ==========
+    scope = ['https://spreadsheets.google.com/feeds',
+             'https://www.googleapis.com/auth/drive',
+             'https://www.googleapis.com/auth/spreadsheets']
+    credentials = Credentials.from_service_account_info(
+        credentials_dict, scopes=scope)
+
+    for attempt in range(retries):
+        try:
+            client = gspread.authorize(credentials)
+            # Test connection
+            client.openall()
+            return client
+        except Exception as e:
+            if attempt < retries - 1:
+                import time
+                time.sleep(delay * (attempt + 1))  # Exponential backoff
+                continue
+            st.error(f"Failed to connect to Google Sheets after {retries} attempts: {str(e)}")
+            return None
+    return None
+
+# ========== 5. Load static Warehouse Region mapping table ==========
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def load_warehouse_region_mapping():
     """
-    Load static warehouse region mapping table from Google Sheets
+    Load static warehouse region mapping table from Google Sheets with JSON fallback
     Table structure: Warehouse, Country, Warehouse Location, Type, Description
     """
-    try:
-        client = connect_to_gsheet()
-        if client is None:
+    def process_mapping_df(mapping_df):
+        """Process and validate mapping dataframe"""
+        if mapping_df is None or mapping_df.empty:
             return None
-        
-        # Get mapping sheet ID from secrets
-        mapping_sheet_id = st.secrets["sheets"]["warehouse_region_sheet_id"]
-        
-        # Open mapping sheet
-        sheet = client.open_by_key(mapping_sheet_id)
-        
-        # Get first worksheet
-        worksheet = sheet.sheet1
-        
-        # Get all records
-        records = worksheet.get_all_records()
-        
-        if not records:
-            st.warning("Warehouse mapping table is empty")
-            return None
-        
-        # Convert to DataFrame
-        mapping_df = pd.DataFrame(records)
-        
-        # Display original column names for debugging
-        st.write("Original column names in mapping table:", list(mapping_df.columns))
-        
+
         # Standardize column names (remove extra spaces)
         mapping_df.columns = [str(col).strip() for col in mapping_df.columns]
-        
+
         # Create column mapping based on your actual column names
         column_mapping = {}
         for col in mapping_df.columns:
@@ -179,33 +165,105 @@ def load_warehouse_region_mapping():
                 column_mapping[col] = 'Type'
             elif 'description' in col_lower:
                 column_mapping[col] = 'Description'
-        
+
         # Rename columns
         if column_mapping:
             mapping_df = mapping_df.rename(columns=column_mapping)
-        
+
         # Ensure required columns exist
         required_cols = ['Warehouse', 'Country']
         missing_cols = [col for col in required_cols if col not in mapping_df.columns]
-        
+
         if missing_cols:
             st.error(f"Missing required columns in mapping table: {missing_cols}")
             st.write("Available columns:", list(mapping_df.columns))
             return None
-        
-        # Show preview
-        with st.expander("View Warehouse Mapping Table"):
-            st.dataframe(mapping_df.head())
-            st.write(f"Total records: {len(mapping_df)}")
-            st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
-            if 'Warehouse_Location' in mapping_df.columns:
-                st.write(f"Warehouse Location distribution: {mapping_df['Warehouse_Location'].value_counts().to_dict()}")
-        
+
         return mapping_df
-        
+
+    def load_from_json():
+        """Load mapping from local JSON file"""
+        try:
+            with open('warehouse_region_mapping.json', 'r', encoding='utf-8') as f:
+                records = json.load(f)
+            mapping_df = pd.DataFrame(records)
+            st.info("Loaded warehouse mapping from local JSON file (Google Sheets unavailable)")
+            return mapping_df
+        except FileNotFoundError:
+            st.error("Local warehouse mapping file not found. Please update warehouse_region_mapping.json")
+            return None
+        except Exception as e:
+            st.error(f"Failed to load warehouse mapping from JSON: {str(e)}")
+            return None
+
+    try:
+        client = connect_to_gsheet()
+        if client is None:
+            # Fallback to JSON
+            st.warning("Google Sheets unavailable, trying local JSON fallback...")
+            mapping_df = load_from_json()
+            if mapping_df is not None:
+                mapping_df = process_mapping_df(mapping_df)
+                if mapping_df is not None:
+                    with st.expander("View Warehouse Mapping Table"):
+                        st.dataframe(mapping_df.head())
+                        st.write(f"Total records: {len(mapping_df)}")
+                        st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
+            return mapping_df
+
+        # Get mapping sheet ID from secrets
+        mapping_sheet_id = st.secrets["sheets"]["warehouse_region_sheet_id"]
+
+        # Open mapping sheet with retry
+        sheet = client.open_by_key(mapping_sheet_id)
+
+        # Get first worksheet
+        worksheet = sheet.sheet1
+
+        # Get all records
+        records = worksheet.get_all_records()
+
+        if not records:
+            st.warning("Warehouse mapping table is empty, trying JSON fallback...")
+            mapping_df = load_from_json()
+            mapping_df = process_mapping_df(mapping_df)
+            if mapping_df is not None:
+                with st.expander("View Warehouse Mapping Table"):
+                    st.dataframe(mapping_df.head())
+                    st.write(f"Total records: {len(mapping_df)}")
+                    st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
+            return mapping_df
+
+        # Convert to DataFrame
+        mapping_df = pd.DataFrame(records)
+
+        # Display original column names for debugging
+        st.write("Original column names in mapping table:", list(mapping_df.columns))
+
+        mapping_df = process_mapping_df(mapping_df)
+
+        if mapping_df is not None:
+            # Show preview
+            with st.expander("View Warehouse Mapping Table"):
+                st.dataframe(mapping_df.head())
+                st.write(f"Total records: {len(mapping_df)}")
+                st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
+                if 'Warehouse_Location' in mapping_df.columns:
+                    st.write(f"Warehouse Location distribution: {mapping_df['Warehouse_Location'].value_counts().to_dict()}")
+
+        return mapping_df
+
     except Exception as e:
-        st.error(f"Failed to load warehouse mapping table: {str(e)}")
-        return None
+        st.warning(f"Failed to load warehouse mapping from Google Sheets: {str(e)}, trying JSON fallback...")
+        mapping_df = load_from_json()
+        if mapping_df is not None:
+            mapping_df = process_mapping_df(mapping_df)
+            if mapping_df is not None:
+                with st.expander("View Warehouse Mapping Table"):
+                    st.dataframe(mapping_df.head())
+                    st.write(f"Total records: {len(mapping_df)}")
+                    st.write(f"Country distribution: {mapping_df['Country'].value_counts().to_dict()}")
+        return mapping_df
 
 # ========== 5. JOIN inventory data with warehouse mapping table ==========
 def join_with_warehouse_region(inventory_df, mapping_df):

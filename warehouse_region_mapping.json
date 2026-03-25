@@ -1,0 +1,198 @@
+[
+  {
+    "Warehouse": "EECI_FortWorth_SOH",
+    "Country": "US Local",
+    "Warehouse Location": "US Local",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Canopyeeci TorontoYYZ1",
+    "Country": "CA Local",
+    "Warehouse Location": "CA Local",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM北美仓、VTM-US美国仓",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBA",
+    "Description": "AMZ 虚拟仓，退货到AMZ变成 like new 出售"
+  },
+  {
+    "Warehouse": "VTM-US美国仓",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM2北美仓",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBA",
+    "Description": "AMZ 虚拟仓，退货到AMZ变成 like new 出售"
+  },
+  {
+    "Warehouse": "FortWorth_Ventmereowner",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Erlanger-CA",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "FTM-NA-CA加拿大仓",
+    "Country": "CA",
+    "Warehouse Location": "CA",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM2-US美国仓",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "OHF-VTM 2488Peck",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM北美仓",
+    "Country": "",
+    "Warehouse Location": "",
+    "Type": "FBA",
+    "Description": "暂时未知该怎么算"
+  },
+  {
+    "Warehouse": "CanopyVentmere",
+    "Country": "CA",
+    "Warehouse Location": "CA",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM2-CA加拿大仓",
+    "Country": "CA",
+    "Warehouse Location": "CA",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM2北美仓、VTM2-US美国仓",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBA",
+    "Description": "AMZ 虚拟仓，退货到AMZ变成 like new 出售"
+  },
+  {
+    "Warehouse": "VTM-CA加拿大仓",
+    "Country": "CA",
+    "Warehouse Location": "CA",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Excel-Ohio",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Richmondeeci",
+    "Country": "CA Local",
+    "Warehouse Location": "CA Local",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM-US美国仓(AWD)",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Refurb-VTM-US美国仓",
+    "Country": "US",
+    "Warehouse Location": "US",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Refurb-VTM-CA加拿大仓",
+    "Country": "CA",
+    "Warehouse Location": "CA",
+    "Type": "FBA",
+    "Description": ""
+  },
+  {
+    "Warehouse": "VTM2北美仓、VTM2-CA加拿大仓",
+    "Country": "CA",
+    "Warehouse Location": "CA",
+    "Type": "FBA",
+    "Description": "AMZ 虚拟仓，退货到AMZ变成 like new 出售"
+  },
+  {
+    "Warehouse": "Oakville2180",
+    "Country": "CA",
+    "Warehouse Location": "CA",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Jetech-Ningbo",
+    "Country": "CN",
+    "Warehouse Location": "Factory",
+    "Type": "",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Edifier-Dongguan-VCDI",
+    "Country": "CN",
+    "Warehouse Location": "Factory",
+    "Type": "",
+    "Description": ""
+  },
+  {
+    "Warehouse": "Maxpower-Weihai",
+    "Country": "CN",
+    "Warehouse Location": "Factory",
+    "Type": "",
+    "Description": ""
+  },
+  {
+    "Warehouse": "EECI-USA-虚",
+    "Country": "US Local",
+    "Warehouse Location": "US Local",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "EECI-CA-虚",
+    "Country": "CA Local",
+    "Warehouse Location": "CA Local",
+    "Type": "FBM",
+    "Description": ""
+  },
+  {
+    "Warehouse": "CN-Virtual-VTM",
+    "Country": "CN",
+    "Warehouse Location": "Factory",
+    "Type": "",
+    "Description": ""
+  }
+]

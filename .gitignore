@@ -5,5 +5,6 @@ __pycache__/
 .env
 *.json
 !maxpower_owner_mapping.json
+!warehouse_region_mapping.json
 test data/
 CLAUDE.md
