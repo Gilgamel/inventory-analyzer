@@ -978,15 +978,19 @@ def main():
             
             # Dictionary to store all reports for download
             all_reports = {}
-            
+
+            # Apply owner filter to the main dataframe for report generation
+            if selected_owners:
+                df_for_reports = df_with_values[df_with_values['Owner'].isin(selected_owners)]
+            else:
+                df_for_reports = df_with_values
+
             tabs = st.tabs([f"{c}" if c in ['US', 'CA', 'CN', 'US Local', 'CA Local'] else f"VTM 北美仓" for c in countries])
-            
+
             for tab, country in zip(tabs, countries):
                 with tab:
                     # Get country data and apply owner filter
-                    country_data = df_with_values[df_with_values['Country'] == country]
-                    if selected_owners:
-                        country_data = country_data[country_data['Owner'].isin(selected_owners)]
+                    country_data = df_for_reports[df_for_reports['Country'] == country]
 
                     # Apply age band filter for display info
                     filter_desc = ""
@@ -1014,7 +1018,7 @@ def main():
                     
                     # Report 1: Age Summary (always shows all age bands, regardless of filter)
                     st.markdown("#### Report 1: Age Summary")
-                    age_summary = generate_age_summary(df_with_values, country)
+                    age_summary = generate_age_summary(df_for_reports, country)
                     
                     if not age_summary.empty:
                         st.dataframe(
@@ -1031,7 +1035,7 @@ def main():
                     
                     # Report 2: Brand ABC (with age band filter)
                     st.markdown("#### Report 2: Brand ABC Classification")
-                    brand_abc = generate_brand_abc(df_with_values, country, selected_age_band)
+                    brand_abc = generate_brand_abc(df_for_reports, country, selected_age_band)
                     
                     if not brand_abc.empty:
                         # Define column order for display
@@ -1058,7 +1062,7 @@ def main():
                     
                     # Report 3: SKU ABC (with age band filter)
                     st.markdown("#### Report 3: SKU ABC Classification")
-                    sku_abc = generate_sku_abc(df_with_values, country, selected_age_band)
+                    sku_abc = generate_sku_abc(df_for_reports, country, selected_age_band)
                     
                     if not sku_abc.empty:
                         display_cols = ['Brand Class', 'Brand', 'SKU', 'Product Name', 'Inventory Qty', 'Inventory Value', 'Value %', 'Cumulative %', 'SKU Class']
@@ -1088,27 +1092,27 @@ def main():
 
             for country in countries:
                 # Age Summary (always included)
-                age_summary = generate_age_summary(df_with_values, country)
+                age_summary = generate_age_summary(df_for_reports, country)
                 if not age_summary.empty:
                     all_download_reports[f"Age Summary - {country}"] = age_summary
 
                 # Generate Brand ABC and SKU ABC for All Data
-                brand_abc_all = generate_brand_abc(df_with_values, country, 'All Data')
+                brand_abc_all = generate_brand_abc(df_for_reports, country, 'All Data')
                 if not brand_abc_all.empty:
                     all_download_reports[f"Brand ABC (All Data) - {country}"] = brand_abc_all
 
-                sku_abc_all = generate_sku_abc(df_with_values, country, 'All Data')
+                sku_abc_all = generate_sku_abc(df_for_reports, country, 'All Data')
                 if not sku_abc_all.empty:
                     all_download_reports[f"SKU ABC (All Data) - {country}"] = sku_abc_all
 
                 # Generate Brand ABC and SKU ABC for each age band
                 for band in AGE_BANDS:
                     band_name = band['name']
-                    brand_abc_band = generate_brand_abc(df_with_values, country, band_name)
+                    brand_abc_band = generate_brand_abc(df_for_reports, country, band_name)
                     if not brand_abc_band.empty:
                         all_download_reports[f"Brand ABC ({band_name}) - {country}"] = brand_abc_band
 
-                    sku_abc_band = generate_sku_abc(df_with_values, country, band_name)
+                    sku_abc_band = generate_sku_abc(df_for_reports, country, band_name)
                     if not sku_abc_band.empty:
                         all_download_reports[f"SKU ABC ({band_name}) - {country}"] = sku_abc_band
 
