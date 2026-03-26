@@ -5,6 +5,7 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime
 import numpy as np
 import json
+import os
 from io import BytesIO
 from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle
@@ -75,6 +76,14 @@ AGE_BANDS = [
 # ========== 3. MAXPOWER SKU Owner Mapping ==========
 with open('maxpower_owner_mapping.json', 'r', encoding='utf-8') as f:
     MAXPOWER_SKU_MAPPING = json.load(f)  # lowercase sku -> owner
+
+# ========== 4. Excluded SKUs Set ==========
+EXCLUDED_SKUS_FILE = "excluded_skus.json"
+EXCLUDED_SKUS_SET = set()
+if os.path.exists(EXCLUDED_SKUS_FILE):
+    with open(EXCLUDED_SKUS_FILE, 'r', encoding='utf-8') as f:
+        excluded_data = json.load(f)
+        EXCLUDED_SKUS_SET = set(excluded_data.get('excluded_skus', []))
 
 def assign_owner(df):
     """
@@ -1244,7 +1253,15 @@ def main():
             # ===== Step 3: Data preprocessing =====
             st.subheader("🔄 Step 3: Data Preprocessing")
             df_processed = preprocess_data(df_with_region)
-            
+
+            # ===== Step 3.5: Filter out excluded SKUs =====
+            if EXCLUDED_SKUS_SET:
+                original_count = len(df_processed)
+                df_processed = df_processed[~df_processed['SKU'].str.lower().isin(EXCLUDED_SKUS_SET)]
+                filtered_count = original_count - len(df_processed)
+                if filtered_count > 0:
+                    st.info(f"Filtered out {filtered_count} excluded SKUs")
+
             # ===== Step 4: Calculate age band values =====
             st.subheader("💰 Step 4: Calculate Inventory Value")
             df_with_values = calculate_age_band_values(df_processed)

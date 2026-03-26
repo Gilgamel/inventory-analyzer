@@ -6,5 +6,6 @@ __pycache__/
 *.json
 !maxpower_owner_mapping.json
 !warehouse_region_mapping.json
+!excluded_skus.json
 test data/
 CLAUDE.md
