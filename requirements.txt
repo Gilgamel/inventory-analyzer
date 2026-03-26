@@ -7,6 +7,7 @@ google-auth-oauthlib==1.2.2     # OAuth 支持
 google-auth-httplib2==0.2.0     # HTTP 客户端
 openpyxl==3.1.5                  # Excel 2024+ 格式
 xlsxwriter==3.2.9                # 写入 Excel 文件（可选）
+requests==2.32.3                 # HTTP client for GitHub Gist API
 
 plotly==6.5.0                    # 交互式图表
 matplotlib==3.10.8               # 基础图表

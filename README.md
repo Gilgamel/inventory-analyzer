@@ -110,6 +110,41 @@ All reports are exported into a single Excel file:
 
 ---
 
+### 7. Inventory Snapshot & Comparison (GitHub Gist)
+
+This feature allows comparing new inventory uploads with historical snapshots to calculate "recent sales".
+
+#### How it works:
+
+1. **Select Baseline Snapshot**: After uploading a file, select a historical snapshot from Gist to compare against
+2. **View Comparison Report**: See Report 4 - SKU Comparison with status flags:
+   - `OK` - Normal sales
+   - `FLAG` - Stock increased (possible returns/replenishment)
+   - `NEW` - SKU not in baseline
+   - `SOLD` - SKU in baseline but not in current upload
+3. **Save Snapshot**: After analysis, save current inventory as a new snapshot for future comparisons
+
+#### Setup:
+
+To enable Gist integration, add to Streamlit secrets:
+
+```toml
+[gist]
+gist_token = "your-github-personal-access-token"
+gist_id = "your-gist-id"
+```
+
+**Creating a GitHub Personal Access Token:**
+1. Go to GitHub Settings → Developer settings → Personal access tokens
+2. Generate new token with `gist` scope
+
+**Creating a Gist:**
+1. Go to https://gist.github.com
+2. Create a new secret gist (name it something like "inventory-snapshots")
+3. Copy the gist ID from the URL (e.g., `https://gist.github.com/username/abc123def456` → ID is `abc123def456`)
+
+---
+
 ## Installation
 
 ### 1. Clone the Repository

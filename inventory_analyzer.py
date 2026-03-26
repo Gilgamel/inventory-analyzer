@@ -9,6 +9,7 @@ from io import BytesIO
 from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle
 from openpyxl.utils.dataframe import dataframe_to_rows
+from inventory_snapshot import load_snapshots, get_snapshot_dataframe, save_snapshot
 
 # Page configuration
 st.set_page_config(
@@ -844,9 +845,215 @@ def create_excel_download(all_reports):
                             pass
                     adjusted_width = min(max_length + 2, 50)  # Cap width at 50
                     worksheet.column_dimensions[column_letter].width = adjusted_width
-    
+
     output.seek(0)
     return output
+
+# ========== 15. SKU Comparison Functions ==========
+def compare_inventory(new_df: pd.DataFrame, baseline_df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
+    """
+    Compare new inventory with baseline snapshot.
+    Aggregates by SKU first, then compares totals.
+
+    Args:
+        new_df: New inventory DataFrame (processed)
+        baseline_df: Baseline snapshot DataFrame
+        debug: If True, include debug column
+
+    Returns:
+        DataFrame with comparison columns added (one row per SKU)
+    """
+    debug_info = []
+
+    # Normalize SKU for matching
+    new_df = new_df.copy()
+    baseline_df = baseline_df.copy()
+    new_df['_sku_key'] = new_df['SKU'].astype(str).str.strip().str.lower()
+    baseline_df['_sku_key'] = baseline_df['SKU'].astype(str).str.strip().str.lower()
+
+    # Aggregate both by SKU (sum all Available_Qty regardless of warehouse/country)
+    baseline_agg = baseline_df.groupby('_sku_key', dropna=False).agg({
+        'Available_Qty': 'sum'
+    }).reset_index()
+
+    new_agg = new_df.groupby('_sku_key', dropna=False).agg({
+        'Available_Qty': 'sum'
+    }).reset_index()
+
+    debug_info.append(f"Baseline aggregated SKUs: {len(baseline_agg)}")
+    debug_info.append(f"New aggregated SKUs: {len(new_agg)}")
+
+    # Get Brand and Country from first occurrence
+    brand_df = new_df.groupby('_sku_key', dropna=False).first()['Brand'].reset_index()
+    brand_df['_sku_key'] = brand_df['_sku_key'].astype(str).str.strip().str.lower()
+    brand_lookup = dict(zip(brand_df['_sku_key'], brand_df['Brand']))
+
+    country_df = new_df.groupby('_sku_key', dropna=False).first()['Country'].reset_index()
+    country_df['_sku_key'] = country_df['_sku_key'].astype(str).str.strip().str.lower()
+    country_lookup = dict(zip(country_df['_sku_key'], country_df['Country']))
+
+    # Create lookup for baseline
+    baseline_lookup = dict(zip(baseline_agg['_sku_key'], baseline_agg['Available_Qty']))
+
+    # Find problematic rows (Old > New but Recent_Sold = 0)
+    problem_rows = []
+
+    # Calculate comparison
+    results = []
+    for _, row in new_agg.iterrows():
+        sku_key = row['_sku_key']
+        new_available = float(row['Available_Qty']) if pd.notna(row['Available_Qty']) else 0.0
+        brand = brand_lookup.get(sku_key, '')
+        country = country_lookup.get(sku_key, 'Unknown')
+
+        if sku_key in baseline_lookup:
+            old_available = float(baseline_lookup[sku_key]) if pd.notna(baseline_lookup[sku_key]) else 0.0
+
+            if new_available < old_available:
+                recent_sold = old_available - new_available
+                status = "Sold"
+            elif new_available > old_available:
+                recent_sold = 0
+                status = "Flagged"
+            else:
+                recent_sold = 0
+                status = "Zero Sales"
+
+            # Check for problems
+            if new_available < old_available and recent_sold == 0:
+                problem_rows.append({
+                    'SKU': sku_key,
+                    'Available_New': new_available,
+                    'Available_Old': old_available,
+                    'Recent_Sales': recent_sold,
+                    'Status': status
+                })
+        else:
+            old_available = None
+            recent_sold = 0
+            status = "New"
+
+        result_row = {
+            'SKU': sku_key,
+            'Country': country if pd.notna(country) else 'Unknown',
+            'Brand': brand,
+            'Available_New': int(new_available),
+            'Available_Old': int(old_available) if old_available is not None else None,
+            'Recent_Sales': int(recent_sold),
+            'Comparison_Status': status
+        }
+        results.append(result_row)
+
+    result_df = pd.DataFrame(results)
+
+    # Debug info
+    debug_info.append(f"Results: {len(result_df)} rows")
+    status_counts = result_df['Comparison_Status'].value_counts()
+    debug_info.append(f"Status summary: {dict(status_counts)}")
+
+    result_df['_debug_info'] = str(debug_info)
+
+    return result_df
+
+
+def add_sold_skus_from_baseline(new_df: pd.DataFrame, baseline_df: pd.DataFrame,
+                                  country: str, owner_filter: list = None) -> pd.DataFrame:
+    """
+    Add SKUs that exist in baseline but not in new data (sold/lost items).
+
+    Args:
+        new_df: New inventory DataFrame (processed)
+        baseline_df: Baseline snapshot DataFrame
+        country: Country to filter
+        owner_filter: List of owners to include
+
+    Returns:
+        DataFrame with sold/lost SKUs added
+    """
+    # Get SKUs in new data (lowercase)
+    new_skus = set()
+    for _, row in new_df.iterrows():
+        sku = str(row.get('SKU', '')).strip().lower()
+        new_skus.add(sku)
+
+    # Find SKUs in baseline not in new data
+    sold_rows = []
+    for _, row in baseline_df.iterrows():
+        sku = str(row.get('SKU', '')).strip().lower()
+        if sku not in new_skus:
+            # This SKU was in baseline but not in new data - sold/lost
+            sold_row = row.to_dict()
+            old_qty = float(row.get('Available_Qty', 0)) if pd.notna(row.get('Available_Qty')) else 0.0
+            sold_row['Available_New'] = 0
+            sold_row['Available_Old'] = old_qty
+            sold_row['Recent_Sales'] = int(old_qty)  # All old quantity was sold
+            sold_row['Comparison_Status'] = 'Sold'
+            sold_rows.append(sold_row)
+
+    if not sold_rows:
+        return pd.DataFrame()
+
+    sold_df = pd.DataFrame(sold_rows)
+
+    # Filter by country if present
+    if 'Country' in sold_df.columns:
+        sold_df = sold_df[sold_df['Country'] == country]
+
+    # Filter by owner if specified
+    if owner_filter and 'Owner' in sold_df.columns:
+        sold_df = sold_df[sold_df['Owner'].isin(owner_filter)]
+
+    return sold_df
+
+
+def generate_sku_comparison(new_df: pd.DataFrame, baseline_df: pd.DataFrame,
+                            country: str, owner_filter: list = None) -> tuple:
+    """
+    Generate SKU comparison report.
+
+    Args:
+        new_df: New inventory DataFrame (processed)
+        baseline_df: Baseline snapshot DataFrame
+        country: Country to filter
+        owner_filter: List of owners to include
+
+    Returns:
+        Tuple of (DataFrame with SKU comparison data, debug_info list)
+    """
+    # Filter by country and owner before comparing
+    filter_df = new_df.copy()
+    if 'Country' in filter_df.columns:
+        filter_df = filter_df[filter_df['Country'] == country]
+    if owner_filter and 'Owner' in filter_df.columns:
+        filter_df = filter_df[filter_df['Owner'].isin(owner_filter)]
+
+    # Compare with baseline (debug mode)
+    compared_df = compare_inventory(filter_df, baseline_df, debug=True)
+
+    # Extract debug info
+    debug_info = []
+    if '_debug_info' in compared_df.columns:
+        debug_info = eval(compared_df['_debug_info'].iloc[0]) if len(compared_df) > 0 else []
+        compared_df = compared_df.drop(columns=['_debug_info'])
+
+    # Add sold/lost SKUs from baseline
+    sold_df = add_sold_skus_from_baseline(filter_df, baseline_df, country, owner_filter)
+
+    # Select columns for display
+    display_cols = ['SKU', 'Country', 'Brand', 'Available_New', 'Available_Old',
+                    'Recent_Sales', 'Comparison_Status']
+    available_cols = [col for col in display_cols if col in compared_df.columns]
+    result_df = compared_df[available_cols].copy()
+
+    # Add sold SKUs if any
+    if not sold_df.empty:
+        sold_display_cols = ['SKU', 'Country', 'Brand', 'Available_New', 'Available_Old',
+                             'Recent_Sales', 'Comparison_Status']
+        sold_available = [col for col in sold_display_cols if col in sold_df.columns]
+        sold_subset = sold_df[sold_available].copy()
+        result_df = pd.concat([result_df, sold_subset], ignore_index=True)
+
+    return result_df, debug_info
 
 # ========== 14. Function to demonstrate ABC classification logic ==========
 def demonstrate_abc_logic():
@@ -948,7 +1155,71 @@ def main():
                 st.dataframe(df.head())
                 st.write(f"Total rows: {len(df)}")
                 st.write(f"Column names: {list(df.columns)}")
-            
+
+            # ===== Step 1.5: Select Baseline Snapshot for Comparison =====
+            st.subheader("📸 Step 1.5: Select Baseline Snapshot (Optional)")
+
+            # Check if Gist is configured
+            gist_configured = hasattr(st.secrets, "gist") and "gist_token" in st.secrets["gist"] and "gist_id" in st.secrets["gist"]
+
+            if gist_configured:
+                gist_token = st.secrets["gist"]["gist_token"]
+                gist_id = st.secrets["gist"]["gist_id"]
+
+                with st.spinner("Loading snapshots from Gist..."):
+                    snapshots, debug_info = load_snapshots(gist_token, gist_id)
+
+                # Show debug info in expander
+                with st.expander("🔧 Gist Debug Info"):
+                    for line in debug_info:
+                        st.write(line)
+
+                if snapshots:
+                    # Create options for dropdown
+                    snapshot_options = ["None (Skip Comparison)"]
+                    snapshot_dates = [None]
+                    for snap in snapshots:
+                        date = snap.get("date", "Unknown")
+                        saved_at = snap.get("saved_at", "")
+                        if saved_at:
+                            try:
+                                saved_dt = datetime.fromisoformat(saved_at.replace("Z", "+00:00"))
+                                saved_str = saved_dt.strftime("%Y-%m-%d %H:%M")
+                            except:
+                                saved_str = saved_at[:16] if len(saved_at) >= 16 else saved_at
+                            snapshot_options.append(f"{date} (saved: {saved_str})")
+                        else:
+                            snapshot_options.append(date)
+                        snapshot_dates.append(snap)
+
+                    selected_snapshot_idx = st.selectbox(
+                        "Compare with baseline snapshot:",
+                        options=range(len(snapshot_options)),
+                        format_func=lambda x: snapshot_options[x],
+                        index=0,
+                        help="Select a historical snapshot to compare against. This will show Recent Sales and status flags."
+                    )
+
+                    if selected_snapshot_idx > 0:
+                        st.session_state['selected_baseline'] = snapshot_dates[selected_snapshot_idx]
+                        st.success(f"Selected baseline: {snapshot_options[selected_snapshot_idx]}")
+                    else:
+                        st.session_state['selected_baseline'] = None
+                        st.info("Comparison skipped - current upload will be saved as a new snapshot.")
+                else:
+                    st.session_state['selected_baseline'] = None
+                    st.warning("No historical snapshots found. This upload will be saved as the baseline for future comparisons.")
+            else:
+                st.session_state['selected_baseline'] = None
+                st.markdown("""
+                **Gist not configured** - To enable snapshot comparison, add to your Streamlit secrets:
+                ```toml
+                [gist]
+                gist_token = "your-github-personal-access-token"
+                gist_id = "your-gist-id"
+                ```
+                """)
+
             # ===== Step 1: Load static warehouse mapping table =====
             st.subheader("🗺️ Step 1: Load Warehouse Region Mapping Table")
             mapping_df = load_warehouse_region_mapping()
@@ -1143,7 +1414,78 @@ def main():
                         else:
                             report_key = f"{country}_SKU_ABC"
                         all_reports[report_key] = sku_abc
-            
+
+                    # Report 4: SKU Comparison (if baseline snapshot is selected)
+                    if st.session_state.get('selected_baseline') is not None:
+                        st.markdown("#### Report 4: SKU Comparison")
+                        baseline_snapshot = st.session_state['selected_baseline']
+                        baseline_df = get_snapshot_dataframe(baseline_snapshot)
+
+                        if not baseline_df.empty:
+                            sku_comparison, debug_info = generate_sku_comparison(
+                                df_for_reports, baseline_df, country,
+                                owner_filter=selected_owners if selected_owners else None
+                            )
+
+                            if not sku_comparison.empty:
+                                # Display stats
+                                sold_count = len(sku_comparison[sku_comparison['Comparison_Status'] == 'Sold'])
+                                flagged_count = len(sku_comparison[sku_comparison['Comparison_Status'] == 'Flagged'])
+                                zero_sales_count = len(sku_comparison[sku_comparison['Comparison_Status'] == 'Zero Sales'])
+                                new_count = len(sku_comparison[sku_comparison['Comparison_Status'] == 'New'])
+
+                                stat_cols = st.columns(4)
+                                with stat_cols[0]:
+                                    st.metric("Sold", sold_count)
+                                with stat_cols[1]:
+                                    st.metric("Flagged", flagged_count, delta="⚠️" if flagged_count > 0 else None)
+                                with stat_cols[2]:
+                                    st.metric("Zero Sales", zero_sales_count)
+                                with stat_cols[3]:
+                                    st.metric("New", new_count, delta="🆕" if new_count > 0 else None)
+
+                                # Status filter
+                                filter_options = ["All", "Sold", "Flagged", "Zero Sales", "New"]
+                                selected_filter = st.selectbox(
+                                    "Filter by status:",
+                                    options=filter_options,
+                                    index=0,
+                                    key=f"comparison_filter_{country}"
+                                )
+
+                                # Apply filter
+                                if selected_filter == "All":
+                                    filtered_df = sku_comparison
+                                else:
+                                    filtered_df = sku_comparison[sku_comparison['Comparison_Status'] == selected_filter]
+
+                                # Show debug info
+                                with st.expander("🔧 Debug Info"):
+                                    for line in debug_info:
+                                        st.write(line)
+                                    st.write(f"Total rows: {len(sku_comparison)}")
+
+                                if not filtered_df.empty:
+                                    st.dataframe(
+                                        filtered_df.style.format({
+                                            'Available_New': '{:,.0f}',
+                                            'Available_Old': '{:,.0f}',
+                                            'Recent_Sales': '{:,.0f}'
+                                        }, na_rep='-'),
+                                        use_container_width=True
+                                    )
+                                    st.caption(f"Showing {len(filtered_df)} of {len(sku_comparison)} SKUs")
+                                else:
+                                    st.info(f"No SKUs with status '{selected_filter}'")
+
+                                # Store full comparison for download
+                                report_key = f"{country}_SKU_Comparison"
+                                all_reports[report_key] = sku_comparison
+                            else:
+                                st.info("No comparison data available for this country.")
+                        else:
+                            st.warning("Baseline snapshot data is empty.")
+
             # ===== Step 7: Generate all reports for download =====
             # Generate complete set of reports for all age bands
             all_download_reports = {}
@@ -1173,6 +1515,18 @@ def main():
                     sku_abc_band = generate_sku_abc(df_for_reports, country, band_name)
                     if not sku_abc_band.empty:
                         all_download_reports[f"SKU ABC ({band_name}) - {country}"] = sku_abc_band
+
+                # Generate SKU Comparison if baseline snapshot is selected
+                if st.session_state.get('selected_baseline') is not None:
+                    baseline_snapshot = st.session_state['selected_baseline']
+                    baseline_df = get_snapshot_dataframe(baseline_snapshot)
+                    if not baseline_df.empty:
+                        sku_comparison, _ = generate_sku_comparison(
+                            df_for_reports, baseline_df, country,
+                            owner_filter=selected_owners if selected_owners else None
+                        )
+                        if not sku_comparison.empty:
+                            all_download_reports[f"SKU Comparison - {country}"] = sku_comparison
 
             # ===== Step 8: Download section with options =====
             if all_download_reports:
@@ -1284,7 +1638,40 @@ def main():
                             )
 
                             st.success(f"✅ {len(filtered_reports)} reports ready for download")
-            
+
+            # ===== Step 9: Save Snapshot to Gist =====
+            if gist_configured:
+                st.markdown("---")
+                st.subheader("📸 Step 9: Save Current Snapshot")
+
+                snapshot_date = datetime.now().strftime("%Y-%m-%d")
+
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    snapshot_date_input = st.text_input(
+                        "Snapshot Date:",
+                        value=snapshot_date,
+                        help="Date identifier for this snapshot (YYYY-MM-DD)"
+                    )
+
+                with col2:
+                    st.write("")  # Spacer
+                    st.write("")
+
+                    if st.button("💾 Save Snapshot", type="primary"):
+                        with st.spinner("Saving snapshot to Gist..."):
+                            success, debug_info = save_snapshot(df_processed, snapshot_date_input, gist_token, gist_id)
+
+                        # Show debug info
+                        with st.expander("🔧 Save Debug Info"):
+                            for line in debug_info:
+                                st.write(line)
+
+                        if success:
+                            st.success(f"✅ Snapshot saved successfully for date: {snapshot_date_input}")
+                        else:
+                            st.error("❌ Failed to save snapshot to Gist")
+
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
             st.exception(e)
