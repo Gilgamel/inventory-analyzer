@@ -1027,8 +1027,13 @@ def generate_sku_comparison(new_df: pd.DataFrame, baseline_df: pd.DataFrame,
     if owner_filter and 'Owner' in filter_df.columns:
         filter_df = filter_df[filter_df['Owner'].isin(owner_filter)]
 
+    # Filter baseline by same country for accurate comparison
+    baseline_filtered = baseline_df.copy()
+    if 'Country' in baseline_filtered.columns:
+        baseline_filtered = baseline_filtered[baseline_filtered['Country'] == country]
+
     # Compare with baseline (debug mode)
-    compared_df = compare_inventory(filter_df, baseline_df, debug=True)
+    compared_df = compare_inventory(filter_df, baseline_filtered, debug=True)
 
     # Extract debug info
     debug_info = []
@@ -1036,8 +1041,8 @@ def generate_sku_comparison(new_df: pd.DataFrame, baseline_df: pd.DataFrame,
         debug_info = eval(compared_df['_debug_info'].iloc[0]) if len(compared_df) > 0 else []
         compared_df = compared_df.drop(columns=['_debug_info'])
 
-    # Add sold/lost SKUs from baseline
-    sold_df = add_sold_skus_from_baseline(filter_df, baseline_df, country, owner_filter)
+    # Add sold/lost SKUs from baseline (using country-filtered baseline)
+    sold_df = add_sold_skus_from_baseline(filter_df, baseline_filtered, country, owner_filter)
 
     # Select columns for display
     display_cols = ['SKU', 'Country', 'Brand', 'Available_New', 'Available_Old',
@@ -1179,6 +1184,8 @@ def main():
                     snapshot_options = ["None (Skip Comparison)"]
                     snapshot_dates = [None]
                     for snap in snapshots:
+                        # Use filename for display since it can be renamed on Gist
+                        filename = snap.get("filename", "")
                         date = snap.get("date", "Unknown")
                         saved_at = snap.get("saved_at", "")
                         if saved_at:
@@ -1187,9 +1194,11 @@ def main():
                                 saved_str = saved_dt.strftime("%Y-%m-%d %H:%M")
                             except:
                                 saved_str = saved_at[:16] if len(saved_at) >= 16 else saved_at
-                            snapshot_options.append(f"{date} (saved: {saved_str})")
+                            # Show filename and date
+                            display_name = f"{filename} ({saved_str})"
+                            snapshot_options.append(display_name)
                         else:
-                            snapshot_options.append(date)
+                            snapshot_options.append(filename if filename else date)
                         snapshot_dates.append(snap)
 
                     selected_snapshot_idx = st.selectbox(
@@ -1599,6 +1608,12 @@ def main():
                             if should_include_country(country):
                                 filtered_options.append(f"Brand ABC ({band_name}) - {country}")
                                 filtered_options.append(f"SKU ABC ({band_name}) - {country}")
+
+                # Add SKU Comparison options (only if baseline snapshot is selected)
+                if st.session_state.get('selected_baseline') is not None:
+                    for country in countries:
+                        if should_include_country(country):
+                            filtered_options.append(f"SKU Comparison - {country}")
 
                 # Multi-select for reports to download (pre-selected based on filters)
                 selected_reports = st.multiselect(

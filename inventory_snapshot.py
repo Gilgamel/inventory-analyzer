@@ -9,6 +9,8 @@ import requests
 import pandas as pd
 import json
 import uuid
+import zlib
+import base64
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 
@@ -59,16 +61,26 @@ def save_snapshot(df: pd.DataFrame, date_str: str, gist_token: str, gist_id: str
         "data": df_subset.to_dict(orient="records")
     }
 
-    # Convert to JSON string (no indent to reduce size)
+    # Convert to JSON string (use ascii=False to keep Chinese characters as-is)
     content = json.dumps(snapshot_data, ensure_ascii=False)
     debug_info.append(f"JSON size: {len(content):,} characters")
+
+    # Compress content if larger than 50KB to avoid Gist truncation
+    COMPRESS_THRESHOLD = 50 * 1024
+    if len(content) > COMPRESS_THRESHOLD:
+        compressed = zlib.compress(content.encode('utf-8'))
+        encoded = base64.b64encode(compressed).decode('ascii')
+        snapshot_data['data'] = encoded
+        snapshot_data['compressed'] = True
+        content = json.dumps(snapshot_data, ensure_ascii=False)  # Keep ascii=False for compatibility
+        debug_info.append(f"Compressed size: {len(content):,} characters")
 
     # Prepare the Gist update request
     url = f"{GIST_API_URL}/{gist_id}"
     headers = _get_gist_headers(gist_token)
 
     try:
-        # Get current gist to preserve existing files
+        # Get current gist to check existing files
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         current_gist = response.json()
@@ -78,14 +90,14 @@ def save_snapshot(df: pd.DataFrame, date_str: str, gist_token: str, gist_id: str
         debug_info.append(f"File exists in Gist: {file_exists}")
         debug_info.append(f"Current files in Gist: {list(files.keys())}")
 
-        # Build files payload - must include ALL existing files to preserve them
-        files_payload = {}
-        for fname, finfo in files.items():
-            if fname != filename:  # Don't include the file we're updating here
-                files_payload[fname] = {"content": finfo.get("content", "")}
+        # Build files payload - ONLY include gistfile1.txt and the new snapshot
+        # Old snapshots will be deleted from Gist (this is by design)
+        files_payload = {
+            "gistfile1.txt": {"content": "# Inventory Snapshot Storage\n"},
+            filename: {"content": content}
+        }
 
-        # Add/update our target file
-        files_payload[filename] = {"content": content}
+        debug_info.append(f"Payload size: {len(json.dumps(files_payload)):,} chars")
 
         # Prepare update payload
         payload = {
@@ -96,7 +108,20 @@ def save_snapshot(df: pd.DataFrame, date_str: str, gist_token: str, gist_id: str
         debug_info.append(f"Updating Gist with {len(files_payload)} files...")
         response = requests.patch(url, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
-        debug_info.append("Save successful!")
+
+        # Verify the saved content
+        verify_response = requests.get(url, headers=headers, timeout=30)
+        verify_response.raise_for_status()
+        verify_data = verify_response.json()
+        saved_file = verify_data.get("files", {}).get(filename, {})
+        saved_content = saved_file.get("content", "")
+
+        if len(saved_content) < len(content) * 0.95:  # Allow 5% tolerance
+            debug_info.append(f"WARNING: File may be truncated! Saved {len(saved_content):,} chars, expected {len(content):,} chars")
+        else:
+            debug_info.append(f"Verified: Saved {len(saved_content):,} chars successfully")
+
+        debug_info.append("Save successful! (Note: Old snapshots were deleted to save space)")
         return True, debug_info
 
     except requests.exceptions.RequestException as e:
@@ -141,6 +166,17 @@ def load_snapshots(gist_token: str, gist_id: str) -> tuple:
                 content = file_info.get("content", "{}")
                 try:
                     snapshot = json.loads(content)
+
+                    # Decompress if data is compressed
+                    if snapshot.get('compressed', False) and isinstance(snapshot.get('data'), str):
+                        try:
+                            compressed = base64.b64decode(snapshot['data'])
+                            decompressed = zlib.decompress(compressed).decode('utf-8')
+                            snapshot = json.loads(decompressed)
+                        except Exception as e:
+                            debug_info.append(f"Decompression error for {filename}: {e}")
+                            continue
+
                     snapshots.append({
                         "date": snapshot.get("date", ""),
                         "saved_at": snapshot.get("saved_at", ""),
