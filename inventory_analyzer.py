@@ -1644,7 +1644,7 @@ def main():
                 st.markdown("---")
                 st.subheader("📸 Step 9: Save Current Snapshot")
 
-                snapshot_date = datetime.now().strftime("%Y-%m-%d")
+                snapshot_date = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
                 col1, col2 = st.columns([3, 1])
                 with col1:
