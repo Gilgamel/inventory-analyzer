@@ -1666,7 +1666,7 @@ def main():
                     snapshot_date_input = st.text_input(
                         "Snapshot Date:",
                         value=snapshot_date,
-                        help="Date identifier for this snapshot (YYYY-MM-DD)"
+                        help="Date identifier for this snapshot (YYYY-MM-DD or YYYY-MM-DD_HH-MM). Note: This uses server time."
                     )
 
                 with col2:
