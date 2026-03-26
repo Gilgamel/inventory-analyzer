@@ -1615,16 +1615,16 @@ def main():
                         if should_include_country(country):
                             filtered_options.append(f"SKU Comparison - {country}")
 
-                # Multi-select for reports to download (pre-selected based on filters)
+                # Multi-select for reports to download (default: SKU Comparison only)
                 selected_reports = st.multiselect(
                     "Select reports to download:",
                     options=filtered_options,
-                    default=filtered_options,
+                    default=[opt for opt in filtered_options if "SKU Comparison" in opt],
                     help="Choose which reports to include in the Excel download"
                 )
 
                 # Add hint about default selection
-                st.caption("💡 By default, all data is downloaded except US Local and CA Local.")
+                st.caption("💡 By default, only SKU Comparison is selected.")
 
                 if selected_reports:
                     # Filter reports based on selection
