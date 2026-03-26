@@ -252,4 +252,13 @@ def get_snapshot_dataframe(snapshot: Dict[str, Any]) -> pd.DataFrame:
     if not data:
         return pd.DataFrame()
 
+    # Decompress if data is compressed (base64 string)
+    if snapshot.get('compressed', False) and isinstance(data, str):
+        try:
+            compressed = base64.b64decode(data)
+            decompressed = zlib.decompress(compressed).decode('utf-8')
+            data = json.loads(decompressed)
+        except Exception:
+            return pd.DataFrame()
+
     return pd.DataFrame(data)
